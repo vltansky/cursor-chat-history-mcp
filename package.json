@@ -1,11 +1,11 @@
 {
-  "name": "cursor-chat-history-mcp",
-  "version": "0.1.9",
-  "description": "MCP server that provides AI assistants access to Cursor chat history for analysis and insights",
+  "name": "mcp-server-boilerplate",
+  "version": "0.1.0",
+  "description": "A boilerplate template for building Model Context Protocol (MCP) servers with TypeScript",
   "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "cursor-chat-history-mcp": "dist/server.js"
+    "mcp-server-boilerplate": "dist/server.js"
   },
   "files": [
     "dist/**/*",
@@ -25,27 +25,24 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "cursor",
-    "chat history",
-    "conversation",
+    "typescript",
+    "boilerplate",
+    "template",
     "ai-assistant",
-    "code-analysis",
-    "typescript"
+    "claude",
+    "cursor"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "better-sqlite3": "9.2.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.11.24",
     "@vitest/ui": "^3.2.2",
     "nodemon": "^3.1.10",
     "shx": "^0.3.4",
-    "task-master-ai": "^0.16.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",

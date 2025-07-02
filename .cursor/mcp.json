@@ -1,14 +1,10 @@
 {
     "mcpServers": {
-      "cursor-chat-history-mcp": {
-          "command": "node",
-          "args": [
-              "/Users/vladta/Projects/cursor-chat-history-mcp/dist/server.js"
-          ]
-      },
-        "taskmaster-ai": {
-          "command": "npx",
-          "args": ["-y", "--package=task-master-ai", "task-master-ai"]
+        "mcp-server-boilerplate": {
+            "command": "node",
+            "args": [
+                "dist/server.js"
+            ]
         }
     }
 }

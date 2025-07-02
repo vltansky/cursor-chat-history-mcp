@@ -1,251 +1,246 @@
-# Cursor Chat History MCP
+# MCP Server Boilerplate
 
-**Give AI assistants access to your Cursor chat history.**
+**A TypeScript template for building Model Context Protocol (MCP) servers.**
 
-A Model Context Protocol (MCP) server that allows Cursor, Claude, and other AI assistants to read and analyze your Cursor chat data. This enables personalized coding assistance based on your actual development patterns and history.
+This boilerplate provides a solid foundation for creating MCP servers that can integrate with Cursor, Claude, and other AI assistants. It includes best practices, example tools, proper error handling, and a well-structured TypeScript codebase.
 
-## What This Enables
+## What This Template Provides
 
-Ask your AI assistant to:
+- **Complete MCP Server Setup**: Ready-to-use server with proper configuration
+- **Example Tools**: Demonstrates common MCP tool patterns and best practices
+- **TypeScript Integration**: Full type safety with Zod validation
+- **Error Handling**: Robust error handling patterns throughout
+- **Testing Setup**: Vitest configuration for unit testing
+- **Development Workflow**: Build, watch, and inspection scripts
 
-- Analyze your chat history to understand your coding patterns and usage statistics
-- Generate project-specific rules based on your actual development discussions
-- Extract insights from past problem-solving sessions and find related conversations
-- Create documentation based on real conversations about your code
-- Export chat data for external analysis and visualization
-- Find and apply solutions you've already worked through
+## Key Features
 
-## Key Benefits
+**Type-Safe Development**: Built with TypeScript and Zod for runtime validation and compile-time safety.
 
-**Generate Personalized Rules**: Create coding standards based on your actual development patterns, not generic best practices.
+**Modular Architecture**: Well-organized code structure with separate modules for tools, utilities, and types.
 
-**Learn from Your History**: Extract insights from past chats to improve future development.
+**Example Patterns**: Demonstrates data retrieval, search, analytics, and system utilities.
 
-**Context-Aware Assistance**: Get help that's informed by your specific projects and coding style.
-
-**Pattern Recognition**: Identify recurring themes and solutions in your development work.
+**Development Ready**: Includes hot reload, testing, and MCP inspector integration.
 
 ## Quick Start
 
-### 1. Configure MCP
-Add to your `.cursor/mcp.json`:
+### 1. Clone and Setup
+```bash
+git clone <your-repo-url>
+cd mcp-server-boilerplate
+yarn install
+yarn build
+```
+
+### 2. Configure MCP Client
+Add to your `.cursor/mcp.json` or other MCP client configuration:
 
 ```json
 {
   "mcpServers": {
-    "cursor-chat-history": {
-      "command": "npx",
-      "args": ["-y", "--package=cursor-chat-history-mcp", "cursor-chat-history-mcp"]
+    "my-custom-server": {
+      "command": "node",
+      "args": ["path/to/your/dist/server.js"]
     }
   }
 }
 ```
 
-### 2. Start Using
-```
-"Analyze my React conversations and create component guidelines"
-"Find debugging patterns in my chat history"
-"Generate TypeScript coding standards from my actual usage"
-"What are the main themes in my recent coding discussions?"
+### 3. Start Developing
+```bash
+yarn watch  # Start development with hot reload
 ```
 
-## Available Tools
+### 4. Test Your Tools
+Use the MCP inspector to test your tools:
+```bash
+yarn inspector
+```
+
+## Example Tools Included
 
 ### Core Tools
 
-- **`list_conversations`** - Browse conversations with filtering options and optional project relevance scoring
-- **`get_conversation`** - Retrieve full conversation content with code and file references
-- **`search_conversations`** - Enhanced search with multi-keyword, LIKE patterns, and text search
+- **`get_data`** - Demonstrates data retrieval with filtering and pagination
+- **`search_items`** - Shows search functionality with multiple search types (exact, fuzzy, regex)
+- **`analyze_data`** - Example analytics tool with chart data generation
+- **`get_system_info`** - System utilities for date, timezone, and version information
 
-### Analytics & Data Extraction Tools
+### Tool Patterns Demonstrated
 
-- **`get_conversation_analytics`** - Comprehensive analytics including usage patterns, file activity, programming language distribution, and temporal trends
-- **`find_related_conversations`** - Find conversations related by shared files, folders, languages, size, or temporal proximity
-- **`extract_conversation_elements`** - Extract files, code blocks, languages, metadata, and conversation structure with flexible grouping
-- **`export_conversation_data`** - Export chat data in JSON, CSV, or Graph formats for external analysis and visualization
+- **Parameter Validation**: Using Zod schemas for type-safe input validation
+- **Error Handling**: Consistent error handling and user-friendly error messages
+- **Async Operations**: Proper async/await patterns with timeout simulation
+- **Response Formatting**: JSON and compact-JSON output modes
+- **Type Safety**: Full TypeScript integration with proper type inference
+
+## Project Structure
+
+```
+src/
+├── server.ts              # Main MCP server setup and tool registration
+├── tools/
+│   └── example-tools.ts    # Example tool implementations
+└── utils/
+    └── formatter.ts        # Response formatting utilities
+
+docs/                       # Documentation files
+package.json               # Dependencies and scripts
+tsconfig.json              # TypeScript configuration
+vitest.config.ts           # Testing configuration
+```
+
+## Customizing for Your Use Case
+
+### 1. Replace Example Tools
+
+Edit `src/tools/example-tools.ts` to implement your business logic:
+
+```typescript
+export async function yourCustomOperation(input: YourInputType): Promise<YourOutputType> {
+  // Your implementation here
+  return result;
+}
+```
+
+### 2. Update Server Registration
+
+Modify `src/server.ts` to register your tools:
+
+```typescript
+server.tool(
+  'your_tool_name',
+  'Description of what your tool does',
+  {
+    // Zod schema for parameters
+    param1: z.string().describe('Parameter description'),
+    param2: z.number().optional().default(10)
+  },
+  async (input) => {
+    // Tool implementation
+    const result = await yourCustomOperation(input);
+    return {
+      content: [{
+        type: 'text',
+        text: formatResponse(result, input.outputMode)
+      }]
+    };
+  }
+);
+```
+
+### 3. Add Your Data Layer
+
+Create modules for your specific data sources:
+
+```
+src/
+├── database/          # Database connections and queries
+├── external-apis/     # External API integrations
+├── file-system/       # File system operations
+└── your-domain/       # Your business logic
+```
+
+## Development Workflow
+
+### Available Scripts
+
+- `yarn build` - Compile TypeScript to JavaScript
+- `yarn watch` - Watch mode for development
+- `yarn start` - Run the compiled server
+- `yarn test` - Run unit tests
+- `yarn test:ui` - Run tests with UI
+- `yarn inspector` - Start MCP inspector for testing tools
+
+### Testing Your Tools
+
+1. **Unit Tests**: Add tests alongside your tool files
+2. **Integration Testing**: Use the MCP inspector to test tool behavior
+3. **Manual Testing**: Test with actual MCP clients like Cursor
+
+### Adding Dependencies
+
+For data sources, add appropriate dependencies:
+
+```bash
+# Database
+yarn add sqlite3 @types/sqlite3
+
+# HTTP requests
+yarn add axios
+
+# File processing
+yarn add fs-extra @types/fs-extra
+
+# Date handling
+yarn add date-fns
+```
+
+## MCP Best Practices
+
+### Tool Design
+
+- **Clear Descriptions**: Write detailed tool descriptions for AI assistants
+- **Parameter Validation**: Use Zod for runtime validation
+- **Error Handling**: Provide meaningful error messages
+- **Output Consistency**: Use consistent response formats
+
+### Performance
+
+- **Async Operations**: Use async/await for all I/O operations
+- **Resource Management**: Clean up resources properly
+- **Caching**: Implement caching for expensive operations
+- **Pagination**: Support pagination for large datasets
+
+### Security
+
+- **Input Validation**: Validate all inputs with Zod
+- **Error Messages**: Don't expose sensitive information in errors
+- **Resource Limits**: Implement appropriate limits and timeouts
+- **Authentication**: Add authentication if accessing sensitive data
 
 ## Common Use Cases
 
-### Generate Coding Rules
-```
-"Create TypeScript interface naming conventions from my conversations"
-"Extract error handling patterns and create guidelines"
-"Find all my discussions about testing and create best practices"
-```
+### File System Tools
+- File search and indexing
+- Content analysis
+- Code parsing and analysis
 
-### Extract Best Practices
-```
-"Show me how I typically use React hooks in my projects"
-"Find patterns in my state management discussions"
-"Analyze my class inheritance usage and create guidelines"
-```
+### Database Integration
+- Query interfaces
+- Data analysis and reporting
+- Schema exploration
 
-### Advanced Analysis
-```
-"Find conversations where I discussed specific functions or patterns"
-"Search for file-specific discussions across my projects"
-"Compare how I've approached similar problems over time"
-```
+### External API Integration
+- API wrapping and simplification
+- Data aggregation from multiple sources
+- Rate limiting and caching
 
-### Create Project Documentation
-```
-"Generate API documentation from my service discussions"
-"Create technical docs from my auth module conversations"
-```
-
-### Learn from Past Solutions
-```
-"Find similar debugging sessions and extract solutions"
-"Analyze my performance optimization discussions"
-```
-
-### Data Analysis & Insights
-```
-"Get comprehensive analytics on my coding patterns over the last 3 months"
-"Export all conversations with React code to CSV for analysis"
-"Find conversations similar to this database migration discussion"
-```
-
-## Privacy & Security
-
-- **Runs locally** - Your chat data never leaves your machine
-- **No external services** - Direct access to your local Cursor database
-- **No API keys required** - No data sharing with external services
-- **Full control** - You decide what data to access and when
-
-## How It Works
-
-**Summary-First Approach for Efficiency**
-
-The entire system is designed to be both powerful and context-efficient:
-
-### **Data Access Process**
-1. **Full Content Analysis**: All tools access complete chat data including:
-   - Complete message text and code blocks
-   - File references and folder paths
-   - Conversation metadata and titles
-   - AI-generated summaries
-
-2. **Smart Result Delivery**: Different tools provide focused outputs:
-   - **`list_conversations`**: Returns conversation summaries with titles and metadata
-   - **`search_conversations`**: Searches full content but returns only summaries with relevance scores
-   - **Analytics tools**: Extract insights and patterns without overwhelming detail
-
-3. **Summary-First Results**: Most tools return:
-   - Conversation summaries and titles
-   - Key metadata (files, folders, message count)
-   - AI-generated summaries when available
-   - Relevant scores and analytics
-
-### **Why This Design?**
-- **Context Efficiency**: Avoids overwhelming AI assistants with full message content
-- **Performance**: Summaries are much smaller and faster to process
-- **Discoverability**: Users can quickly scan results to identify relevant conversations
-- **Deep Dive When Needed**: Use `get_conversation` for full content of specific conversations
-
-This approach lets you efficiently browse, search, and analyze your chat history, then dive deep only into conversations that matter for your current task.
-
-## Installation
-
-### For Development
-```bash
-git clone https://github.com/vltansky/cursor-chat-history-mcp
-cd cursor-chat-history-mcp
-yarn install
-yarn build
-```
-
-### For Use
-The npx configuration above handles installation automatically.
-
-## Tool Reference
-
-### Output Formats
-
-All tools support JSON output formats via the `outputMode` parameter:
-
-- **`json` (default)** - Formatted JSON with proper indentation for readability
-- **`compact-json`** - Minified JSON without formatting for minimal size
-
-### Core Tools
-
-**`list_conversations`**
-- `limit` (default: 10) - Number of conversations to return
-- `includeAiSummaries` (default: true) - Include AI-generated summaries for efficient browsing
-- `projectPath` - Filter by project path
-- `includeRelevanceScore` (default: false) - Include relevance scores when filtering by projectPath
-- `hasCodeBlocks` - Filter conversations with/without code
-- `keywords` - Search by keywords
-- `filePattern` - Filter by file pattern
-
-**`get_conversation`**
-- `conversationId` (required) - Conversation to retrieve
-- `summaryOnly` (default: false) - Get enhanced summary without full content to save context
-- `includeMetadata` (default: false) - Include additional metadata
-
-**`search_conversations`** - Enhanced search with multiple methods
-- **Simple Query**: `query` - Basic text search (backward compatible)
-- **Multi-keyword**: `keywords` array with `keywordOperator` ('AND'/'OR')
-- **LIKE Patterns**: `likePattern` - SQL LIKE patterns (% = any chars, _ = single char)
-- `searchType` (default: 'all') - 'all', 'project', 'files', 'code'
-- `maxResults` (default: 10) - Maximum results
-- `includeCode` (default: true) - Include code blocks
-
-
-
-### Analytics & Data Extraction Tools
-
-**`get_conversation_analytics`**
-- `scope` (default: 'all') - 'all', 'recent', 'project'
-- `projectPath` - Focus on specific project (required when scope='project')
-- `recentDays` (default: 30) - Time window for recent scope
-- `includeBreakdowns` (default: ['files', 'languages']) - Analysis types: 'files', 'languages', 'temporal', 'size'
-
-**`find_related_conversations`**
-- `referenceConversationId` (required) - Starting conversation
-- `relationshipTypes` (default: ['files']) - 'files', 'folders', 'languages', 'size', 'temporal'
-- `maxResults` (default: 10) - Number of results
-- `minScore` (default: 0.1) - Minimum similarity score (0-1)
-- `includeScoreBreakdown` (default: false) - Show individual relationship scores
-
-**`extract_conversation_elements`**
-- `conversationIds` - Specific conversations (optional, processes all if empty)
-- `elements` (default: ['files', 'codeblocks']) - 'files', 'folders', 'languages', 'codeblocks', 'metadata', 'structure'
-- `includeContext` (default: false) - Include surrounding message text
-- `groupBy` (default: 'conversation') - 'conversation', 'element', 'none'
-- `filters` - Filter by code length, file extensions, or languages
-
-**`export_conversation_data`**
-- `conversationIds` - Specific conversations (optional, exports all if empty)
-- `format` (default: 'json') - 'json', 'csv', 'graph'
-- `includeContent` (default: false) - Include full message text
-- `includeRelationships` (default: false) - Calculate file/folder connections
-- `flattenStructure` (default: false) - Flatten for CSV compatibility
-- `filters` - Filter by size, code blocks, or project path
-
-## Database Paths
-
-Auto-detected locations:
-- **macOS**: `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`
-- **Windows**: `%APPDATA%/Cursor/User/globalStorage/state.vscdb`
-- **Linux**: `~/.config/Cursor/User/globalStorage/state.vscdb`
-
-## Technical Notes
-
-- Supports both legacy and modern Cursor conversation formats
-- Uses SQLite to access Cursor's chat database
-- Close Cursor before running to avoid database lock issues
-- Conversations filtered by size (>1000 bytes) to exclude empty ones
-- Uses ROWID for chronological ordering (UUIDs are not chronological)
+### Development Tools
+- Code generation
+- Testing utilities
+- Build and deployment helpers
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
+1. Fork this repository
+2. Create your feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
 5. Submit a pull request
 
 ## License
 
-MIT
+MIT License - feel free to use this template for your own projects.
+
+## Resources
+
+- [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
+- [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+- [Zod Documentation](https://zod.dev/)
+- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
+
+---
+
+**Ready to build your MCP server?** Start by customizing the example tools in `src/tools/example-tools.ts` and updating the server registration in `src/server.ts`.
