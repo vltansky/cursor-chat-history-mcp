@@ -1,4 +1,5 @@
 # Cursor Chat History MCP
+[![smithery badge](https://smithery.ai/badge/@vltansky/cursor-chat-history-mcp)](https://smithery.ai/server/@vltansky/cursor-chat-history-mcp)
 
 **Give AI assistants access to your Cursor chat history.**
 
@@ -150,6 +151,14 @@ The entire system is designed to be both powerful and context-efficient:
 This approach lets you efficiently browse, search, and analyze your chat history, then dive deep only into conversations that matter for your current task.
 
 ## Installation
+
+### Installing via Smithery
+
+To install Cursor Chat History for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@vltansky/cursor-chat-history-mcp):
+
+```bash
+npx -y @smithery/cli install @vltansky/cursor-chat-history-mcp --client claude
+```
 
 ### For Development
 ```bash
