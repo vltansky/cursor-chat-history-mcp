@@ -4,6 +4,10 @@
 
 A Model Context Protocol (MCP) server that allows Cursor, Claude, and other AI assistants to read and analyze your Cursor chat data. This enables personalized coding assistance based on your actual development patterns and history.
 
+<a href="https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp/badge" alt="Cursor Conversations Server MCP server" />
+</a>
+
 ## What This Enables
 
 Ask your AI assistant to:
@@ -190,8 +194,6 @@ All tools support JSON output formats via the `outputMode` parameter:
 - `searchType` (default: 'all') - 'all', 'project', 'files', 'code'
 - `maxResults` (default: 10) - Maximum results
 - `includeCode` (default: true) - Include code blocks
-
-
 
 ### Analytics & Data Extraction Tools
 
