@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { CursorDatabaseReader } from '../database/reader.js';
-import { ConversationParser } from '../database/parser.js';
-import type { ConversationFilters, ConversationSummary, ConversationSearchResult, BubbleMessage } from '../database/types.js';
+import type { BubbleMessage, ConversationFilters } from '../database/types.js';
 import { detectCursorDatabasePath } from '../utils/database-utils.js';
 
 // Input schema for list_conversations tool

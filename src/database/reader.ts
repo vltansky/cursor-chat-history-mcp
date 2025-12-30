@@ -17,7 +17,6 @@ import {
   isModernConversation
 } from './types.js';
 import {
-  validateDatabasePath,
   createDefaultDatabaseConfig,
   extractComposerIdFromKey,
   generateBubbleIdKey,
