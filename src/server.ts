@@ -51,6 +51,7 @@ import {
 import { z } from 'zod';
 import { formatResponse } from './utils/formatter.js';
 import { autoInstallHooks } from './linker/auto-install.js';
+import { registerPrompts } from './prompts.js';
 
 // Handle CLI commands if 'link' subcommand is used
 const args = process.argv.slice(2);
@@ -405,6 +406,9 @@ server.tool(
     }
   }
 );
+
+// Register prompts
+registerPrompts(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
