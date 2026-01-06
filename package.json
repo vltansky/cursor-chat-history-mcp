@@ -1,12 +1,10 @@
 {
   "name": "cursor-chat-history-mcp",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "MCP server that provides AI assistants access to Cursor chat history for analysis and insights",
   "type": "module",
   "main": "dist/server.js",
-  "bin": {
-    "cursor-chat-history-mcp": "dist/server.js"
-  },
+  "bin": "dist/server.js",
   "files": [
     "dist/**/*",
     "README.md",
@@ -36,7 +34,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "better-sqlite3": "9.2.2",
+    "better-sqlite3": "^12.5.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

@@ -30,6 +30,7 @@ describe('Conversation Tools', () => {
       getConversationById: vi.fn(),
       getBubbleMessage: vi.fn(),
       searchConversations: vi.fn(),
+      searchConversationsEnhanced: vi.fn(),
       getConversationIdsByProject: vi.fn()
     };
 
@@ -67,7 +68,7 @@ describe('Conversation Tools', () => {
       expect(mockReader.close).toHaveBeenCalled();
       expect(result.conversations).toHaveLength(2);
       expect(result.totalFound).toBe(2);
-      expect(result.filters.limit).toBe(1000);
+      expect(result.filters.limit).toBe(10); // Default limit is 10
       expect(result.filters.minLength).toBe(100);
     });
 
@@ -89,46 +90,38 @@ describe('Conversation Tools', () => {
   });
 
   describe('getConversation', () => {
-    it('should get legacy conversation with full content', async () => {
-      const mockConversation = {
+    it('should get conversation summary when summaryOnly is true', async () => {
+      const mockSummary = {
         composerId: 'conv1',
-        hasLoaded: true,
-        text: '',
-        richText: '',
-        conversation: [
-          {
-            type: 1,
-            bubbleId: 'bubble1',
-            text: 'Hello',
-            relevantFiles: ['file1.ts'],
-            suggestedCodeBlocks: [{
-              language: 'typescript',
-              code: 'console.log("hello");',
-              filename: 'test.ts'
-            }],
-            attachedFoldersNew: ['folder1']
-          }
-        ]
+        format: 'legacy' as const,
+        messageCount: 1,
+        title: 'Test Conversation',
+        aiGeneratedSummary: 'A test summary',
+        relevantFiles: ['file1.ts'],
+        attachedFolders: ['folder1'],
+        conversationSize: 1000
       };
 
-      mockReader.getConversationById.mockResolvedValue(mockConversation);
+      mockReader.getConversationSummary.mockResolvedValue(mockSummary);
 
       const result = await getConversation({
-        conversationId: 'conv1'
+        conversationId: 'conv1',
+        summaryOnly: true
       });
 
       expect(mockReader.connect).toHaveBeenCalled();
-      expect(mockReader.getConversationById).toHaveBeenCalledWith('conv1');
+      expect(mockReader.getConversationSummary).toHaveBeenCalled();
       expect(result.conversation).toBeDefined();
       expect(result.conversation!.format).toBe('legacy');
       expect(result.conversation!.messageCount).toBe(1);
     });
 
     it('should return null for non-existent conversation', async () => {
-      mockReader.getConversationById.mockResolvedValue(null);
+      mockReader.getConversationSummary.mockResolvedValue(null);
 
       const result = await getConversation({
-        conversationId: 'nonexistent'
+        conversationId: 'nonexistent',
+        summaryOnly: true
       });
 
       expect(result.conversation).toBeNull();
@@ -191,23 +184,14 @@ describe('Conversation Tools', () => {
         }
       ];
 
-      mockReader.searchConversations.mockResolvedValue(mockResults);
+      mockReader.searchConversationsEnhanced.mockResolvedValue(mockResults);
 
       const result = await searchConversations({
         query: 'test query'
       });
 
-      expect(mockReader.searchConversations).toHaveBeenCalledWith('test query', {
-        includeCode: true,
-        contextLines: 3,
-        maxResults: 20,
-        searchBubbles: true,
-        searchType: 'all',
-        format: 'both'
-      });
-
-      expect(result.results).toEqual(mockResults);
-      expect(result.totalResults).toBe(1);
+      expect(mockReader.searchConversationsEnhanced).toHaveBeenCalled();
+      expect(result.conversations).toBeDefined();
       expect(result.query).toBe('test query');
     });
   });

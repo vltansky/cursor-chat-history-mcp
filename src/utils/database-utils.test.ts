@@ -260,7 +260,7 @@ describe('Database Utils', () => {
       expect(config.dbPath).toBe(customPath);
       expect(config.maxConversations).toBe(1000);
       expect(config.cacheEnabled).toBe(true);
-      expect(config.minConversationSize).toBe(5000);
+      expect(config.minConversationSize).toBe(100); // Reduced to capture more conversations
       expect(config.resolveBubblesAutomatically).toBe(true);
     });
 

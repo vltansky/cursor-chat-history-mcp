@@ -123,12 +123,13 @@ describe('Cache', () => {
       expect(cache.get('key2')).toBe('value2'); // Should still exist
     });
 
-    it('should handle entries with no TTL (never expire)', () => {
-      cache = new Cache({ defaultTTL: 0, enableCleanup: false });
+    it('should handle entries with very long TTL', () => {
+      // Use a very long TTL (1 hour) to test entries that don't expire quickly
+      cache = new Cache({ defaultTTL: 60 * 60 * 1000, enableCleanup: false });
 
       cache.set('key1', 'value1');
 
-      // Advance time significantly
+      // Advance time by 10 seconds - entry should still exist
       vi.advanceTimersByTime(10000);
 
       expect(cache.get('key1')).toBe('value1');

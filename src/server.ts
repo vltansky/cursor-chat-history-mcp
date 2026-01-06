@@ -3,25 +3,29 @@
 /*
  * WORKFLOW GUIDANCE FOR AI ASSISTANTS:
  *
-
-* **ALWAYS START WITH PROJECT FILTERING** for project-specific analysis:
+ * **ALWAYS START WITH PROJECT FILTERING** for project-specific analysis:
  * 1. DISCOVERY: Use list_conversations with projectPath parameter to find project-specific conversations
  * 2. ANALYTICS: Use get_conversation_analytics with projectPath and ["files", "languages"] breakdowns
  *    - Files/languages breakdowns contain conversation IDs in their arrays!
  * 3. DEEP DIVE: Use get_conversation with specific conversation IDs from step 1 or 2
- * 4. ANALYSIS: Use analytics tools (find_related, extract_elements) for insights
- * 5. DATE FILTERING: Use get_system_info first when applying date filters to search_conversations
+ *    - Returns file path to markdown file - use Read/Grep tools to navigate large conversations
  *
  * RECOMMENDED PATTERN FOR PROJECT ANALYSIS:
  * - list_conversations(projectPath: "project-name", startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD")
  * - get_conversation_analytics(projectPath: "project-name", includeBreakdowns: ["files", "languages"])
  * - Extract conversation IDs from files/languages.conversations arrays
- * - get_conversation(conversationId: "id-from-breakdown") for each relevant conversation
+ * - get_conversation(conversationId: "id-from-breakdown") returns file path
+ * - Use Read/Grep tools on the returned file path to find specific content
  *
  * PROJECT PATH EXAMPLES:
  * - "my-app" (project name)
  * - "/Users/name/Projects/my-app" (full path)
  * - "editor-elements" (project name from path like /Users/name/Projects/editor-elements)
+ *
+ * GIT LINKER TOOLS:
+ * - list_conversation_commits: Find git commits linked to conversations
+ * - get_commit_conversations: Find conversations linked to a specific commit
+ * - get_file_context: Get conversation/commit context for a file (supports keywords filtering)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -32,16 +36,33 @@ import {
   searchConversations,
   getConversationsByProject
 } from './tools/conversation-tools.js';
+import { getConversationAnalytics } from './tools/analytics-tools.js';
 import {
-  getConversationAnalytics,
-  findRelatedConversations
-} from './tools/analytics-tools.js';
-import {
-  extractConversationElements,
-  exportConversationData
-} from './tools/extraction-tools.js';
+  listConversationCommits,
+  getCommitConversations,
+  getFileContext,
+  linkConversationCommit,
+  listConversationCommitsSchema,
+  getCommitConversationsSchema,
+  getFileContextSchema,
+  linkConversationCommitSchema,
+  runLinkerCli,
+} from './linker/index.js';
 import { z } from 'zod';
 import { formatResponse } from './utils/formatter.js';
+import { autoInstallHooks } from './linker/auto-install.js';
+
+// Handle CLI commands if 'link' subcommand is used
+const args = process.argv.slice(2);
+if (args[0] === 'link') {
+  runLinkerCli(args.slice(1)).then(() => {
+    process.exit(process.exitCode ?? 0);
+  });
+} else {
+  // Continue with MCP server startup
+
+  // Auto-install Cursor and Git hooks silently on startup
+  autoInstallHooks();
 
 const server = new McpServer({
   name: 'cursor-chat-history-mcp',
@@ -263,20 +284,24 @@ server.tool(
   }
 );
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Git Linker Tools
+// ─────────────────────────────────────────────────────────────────────────────
+
 server.tool(
-  'find_related_conversations',
-  'Find conversations related to a reference conversation based on shared files, folders, programming languages, similar size, or temporal proximity. Use this to discover related discussions, find conversations about the same codebase/project, identify similar problem-solving sessions, or trace the evolution of ideas across multiple conversations.',
+  'list_conversation_commits',
+  'List git commits linked to Cursor conversations. Filter by conversation ID, project path, or file path. Returns conversation metadata plus linked commits with confidence scores and matched files. Use this to understand the git history associated with your conversations.',
   {
-    referenceConversationId: z.string().min(1).describe('ID of the conversation to find related conversations for'),
-    relationshipTypes: z.array(z.enum(['files', 'folders', 'languages', 'size', 'temporal'])).optional().default(['files']).describe('Types of relationships to consider when finding related conversations'),
-    maxResults: z.number().min(1).max(50).optional().default(10).describe('Maximum number of related conversations to return (1-50)'),
-    minScore: z.number().min(0).max(1).optional().default(0.1).describe('Minimum similarity score threshold (0.0-1.0)'),
-    includeScoreBreakdown: z.boolean().optional().default(false).describe('Include detailed breakdown of how similarity scores were calculated'),
-    outputMode: z.enum(['json', 'compact-json']).optional().default('json').describe('Output format: "json" for formatted JSON (default), "compact-json" for minified JSON')
+    conversationId: listConversationCommitsSchema.shape.conversationId,
+    projectPath: listConversationCommitsSchema.shape.projectPath,
+    filePath: listConversationCommitsSchema.shape.filePath,
+    limit: listConversationCommitsSchema.shape.limit,
+    outputMode: listConversationCommitsSchema.shape.outputMode,
   },
   async (input) => {
     try {
-      const result = await findRelatedConversations(input);
+      const result = await listConversationCommits(input);
       return {
         content: [{
           type: 'text',
@@ -295,31 +320,15 @@ server.tool(
 );
 
 server.tool(
-  'extract_conversation_elements',
-  'Extract specific elements from conversations such as file references, code blocks, programming languages, folder paths, metadata, or conversation structure. Use this to build knowledge bases, analyze code patterns, extract reusable snippets, understand project file usage, or prepare data for further analysis and documentation.',
+  'get_commit_conversations',
+  'Get Cursor conversations linked to a specific git commit. Returns commit metadata plus linked conversations with confidence scores. Use this to find the discussion context for a commit.',
   {
-    conversationIds: z.array(z.string()).optional().describe('Specific conversation IDs to extract elements from (if not provided, extracts from all conversations)'),
-    elements: z.array(z.enum(['files', 'folders', 'languages', 'codeblocks', 'metadata', 'structure'])).optional().default(['files', 'codeblocks']).describe('Types of elements to extract from conversations'),
-    includeContext: z.boolean().optional().default(false).describe('Include surrounding context for extracted elements'),
-    groupBy: z.enum(['conversation', 'element', 'none']).optional().default('conversation').describe('How to group the extracted elements in the output'),
-    filters: z.object({
-      minCodeLength: z.number().optional().describe('Minimum length for code blocks to include'),
-      fileExtensions: z.array(z.string()).optional().describe('Only include files with these extensions'),
-      languages: z.array(z.string()).optional().describe('Only include code blocks in these programming languages')
-    }).optional().describe('Filters to apply when extracting elements'),
-    outputMode: z.enum(['json', 'compact-json']).optional().default('json').describe('Output format: "json" for formatted JSON (default), "compact-json" for minified JSON')
+    commitHash: getCommitConversationsSchema.shape.commitHash,
+    outputMode: getCommitConversationsSchema.shape.outputMode,
   },
   async (input) => {
     try {
-      const mappedInput = {
-        conversationIds: input.conversationIds,
-        elements: input.elements,
-        includeContext: input.includeContext,
-        groupBy: input.groupBy,
-        filters: input.filters
-      };
-
-      const result = await extractConversationElements(mappedInput);
+      const result = await getCommitConversations(input);
       return {
         content: [{
           type: 'text',
@@ -338,33 +347,17 @@ server.tool(
 );
 
 server.tool(
-  'export_conversation_data',
-  'Export chat data in various formats (JSON, CSV, Graph) for external analysis, visualization, or integration with other tools. **TIP: Use filters.projectPath to export only project-specific conversations** for focused analysis of a particular codebase. Use this to create datasets for machine learning, generate reports for stakeholders, prepare data for visualization tools like Gephi or Tableau, or backup chat data in structured formats.',
+  'get_file_context',
+  'Get conversation and commit context for a specific file. Returns conversations and commits that touched this file, with relevance indicators. Use keywords parameter to filter conversations by topic and get matching excerpts. NOTE: This returns metadata only - use file-reading tools to get actual file contents, and get_conversation to see full conversation details.',
   {
-    conversationIds: z.array(z.string()).optional().describe('Specific conversation IDs to export (if not provided, exports all conversations)'),
-    format: z.enum(['json', 'csv', 'graph']).optional().default('json').describe('Export format: JSON for structured data, CSV for spreadsheets, Graph for network analysis'),
-    includeContent: z.boolean().optional().default(false).describe('Include full conversation content in the export'),
-    includeRelationships: z.boolean().optional().default(false).describe('Include relationship data between conversations'),
-    flattenStructure: z.boolean().optional().default(false).describe('Flatten nested structures for easier processing'),
-    filters: z.object({
-      minSize: z.number().optional().describe('Minimum conversation size to include'),
-      hasCodeBlocks: z.boolean().optional().describe('Only include conversations with code blocks'),
-              projectPath: z.string().optional().describe('**RECOMMENDED** Only include conversations related to this project/codebase name or path. Dramatically improves relevance by filtering to conversations that actually worked on files in that project.')
-    }).optional().describe('Filters to apply when selecting conversations to export'),
-    outputMode: z.enum(['json', 'compact-json']).optional().default('json').describe('Output format: "json" for formatted JSON (default), "compact-json" for minified JSON')
+    filePath: getFileContextSchema.shape.filePath,
+    keywords: getFileContextSchema.shape.keywords,
+    limit: getFileContextSchema.shape.limit,
+    outputMode: getFileContextSchema.shape.outputMode,
   },
   async (input) => {
     try {
-      const mappedInput = {
-        conversationIds: input.conversationIds,
-        format: input.format,
-        includeContent: input.includeContent,
-        includeRelationships: input.includeRelationships,
-        flattenStructure: input.flattenStructure,
-        filters: input.filters
-      };
-
-      const result = await exportConversationData(mappedInput);
+      const result = await getFileContext(input);
       return {
         content: [{
           type: 'text',
@@ -383,42 +376,37 @@ server.tool(
 );
 
 server.tool(
-  'get_system_info',
-  'Get system information and utilities for AI assistants. Provides current date, timezone, and other helpful context that AI assistants may not have access to. Use this when you need reference information for date filtering, time-based queries, or other system context.',
+  'link_conversation_commit',
+  'Manually link a Cursor conversation to a git commit. Creates a manual link with specified confidence. Use this when the automatic linking missed a connection, or to explicitly associate a conversation with a commit.',
   {
-    info: z.enum(['date', 'timezone', 'all']).optional().default('all').describe('Type of system information to retrieve: "date" for current date only, "timezone" for timezone info, "all" for everything')
+    conversationId: linkConversationCommitSchema.shape.conversationId,
+    commitHash: linkConversationCommitSchema.shape.commitHash,
+    matchedFiles: linkConversationCommitSchema.shape.matchedFiles,
+    confidence: linkConversationCommitSchema.shape.confidence,
   },
   async (input) => {
-    const now = new Date();
-    const currentDate = now.toISOString().split('T')[0];
-    const currentTime = now.toISOString();
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    let response = '';
-
-    if (input.info === 'date') {
-      response = `Current date: ${currentDate}`;
-    } else if (input.info === 'timezone') {
-      response = `Timezone: ${timezone}`;
-    } else {
-      response = [
-        `Current date: ${currentDate}`,
-        `Current time: ${currentTime}`,
-        `Timezone: ${timezone}`,
-        ``,
-        `Use this date information when applying date filters to search_conversations.`,
-        `Date format for filters: YYYY-MM-DD (e.g., "${currentDate}")`
-      ].join('\n');
+    try {
+      const result = await linkConversationCommit(input);
+      return {
+        content: [{
+          type: 'text',
+          text: result.success
+            ? `${result.message}\n\n${JSON.stringify(result.link, null, 2)}`
+            : `Error: ${result.message}`
+        }]
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
+        }]
+      };
     }
-
-    return {
-      content: [{
-        type: 'text',
-        text: response
-      }]
-    };
   }
 );
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+} // End of else block for MCP server (CLI handled above)

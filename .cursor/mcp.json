@@ -5,10 +5,6 @@
           "args": [
               "/Users/vladta/Projects/cursor-chat-history-mcp/dist/server.js"
           ]
-      },
-        "taskmaster-ai": {
-          "command": "npx",
-          "args": ["-y", "--package=task-master-ai", "task-master-ai"]
-        }
+      }
     }
 }

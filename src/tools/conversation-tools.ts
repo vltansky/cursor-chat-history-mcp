@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CursorDatabaseReader } from '../database/reader.js';
 import type { BubbleMessage, ConversationFilters } from '../database/types.js';
 import { detectCursorDatabasePath } from '../utils/database-utils.js';
+import { writeConversationFile, type ConversationFileStats } from '../utils/context-files.js';
 
 // Input schema for list_conversations tool
 export const listConversationsSchema = z.object({
@@ -171,7 +172,12 @@ export type GetConversationInput = z.infer<typeof getConversationSchema>;
 
 // Output type for get_conversation tool
 export interface GetConversationOutput {
-  conversation: {
+  // File-based response (when not summaryOnly)
+  filePath?: string;
+  stats?: ConversationFileStats;
+  guidance?: string;
+  // Summary-only response
+  conversation?: {
     composerId: string;
     format: 'legacy' | 'modern';
     messageCount: number;
@@ -206,18 +212,17 @@ export interface GetConversationOutput {
 }
 
 /**
- * Get a specific conversation by ID with full content
+ * Get a specific conversation by ID
+ * - summaryOnly=true: returns conversation object with summary data
+ * - summaryOnly=false: writes full conversation to markdown file and returns path + stats
  */
 export async function getConversation(input: GetConversationInput): Promise<GetConversationOutput> {
-  // Validate input
   const validatedInput = getConversationSchema.parse(input);
 
-  // Create database reader
   const dbPath = process.env.CURSOR_DB_PATH || detectCursorDatabasePath();
   const reader = new CursorDatabaseReader({ dbPath });
 
   try {
-    // Connect to database
     await reader.connect();
 
     // If summaryOnly is requested, return enhanced summary without full content
@@ -254,135 +259,76 @@ export async function getConversation(input: GetConversationInput): Promise<GetC
       };
     }
 
-    // Get conversation
+    // Full content mode: write to file and return path
     const conversation = await reader.getConversationById(validatedInput.conversationId);
 
     if (!conversation) {
       return { conversation: null };
     }
 
-    // Get conversation summary to extract title and AI summary
     const summary = await reader.getConversationSummary(validatedInput.conversationId, {
       includeTitle: true,
-      includeAIGeneratedSummary: true
+      includeAIGeneratedSummary: true,
+      includeFileList: true
     });
 
-    // Determine format
     const format = conversation.hasOwnProperty('_v') ? 'modern' : 'legacy';
+    const messages: Array<{
+      type: number;
+      text: string;
+      bubbleId?: string;
+      codeBlocks?: Array<{ language: string; code: string; filename?: string }>;
+    }> = [];
 
-    // Build response based on format
     if (format === 'legacy') {
       const legacyConv = conversation as any;
-      const messages = legacyConv.conversation || [];
+      const rawMessages = legacyConv.conversation || [];
 
-      // Extract data
-      let allCodeBlocks: any[] = [];
-      let allRelevantFiles: string[] = [];
-      let allAttachedFolders: string[] = [];
-
-      const processedMessages = messages.map((msg: any) => {
-        if (validatedInput.includeCodeBlocks && msg.suggestedCodeBlocks) {
-          allCodeBlocks.push(...msg.suggestedCodeBlocks);
-        }
-
-        if (validatedInput.includeFileReferences) {
-          if (msg.relevantFiles) allRelevantFiles.push(...msg.relevantFiles);
-          if (msg.attachedFoldersNew) allAttachedFolders.push(...msg.attachedFoldersNew);
-        }
-
-        return {
+      for (const msg of rawMessages) {
+        messages.push({
           type: msg.type,
           text: msg.text,
           bubbleId: msg.bubbleId,
-          relevantFiles: validatedInput.includeFileReferences ? msg.relevantFiles : undefined,
-          attachedFolders: validatedInput.includeFileReferences ? msg.attachedFoldersNew : undefined,
-          codeBlocks: validatedInput.includeCodeBlocks ? msg.suggestedCodeBlocks : undefined
-        };
-      });
-
-      allRelevantFiles = Array.from(new Set(allRelevantFiles));
-      allAttachedFolders = Array.from(new Set(allAttachedFolders));
-
-      return {
-        conversation: {
-          composerId: legacyConv.composerId,
-          format: 'legacy',
-          messageCount: messages.length,
-          title: summary?.title,
-          aiGeneratedSummary: summary?.aiGeneratedSummary,
-          messages: processedMessages,
-          codeBlocks: validatedInput.includeCodeBlocks ? allCodeBlocks : undefined,
-          relevantFiles: validatedInput.includeFileReferences ? allRelevantFiles : undefined,
-          attachedFolders: validatedInput.includeFileReferences ? allAttachedFolders : undefined,
-          metadata: validatedInput.includeMetadata ? {
-            hasLoaded: true,
-            storedSummary: legacyConv.storedSummary,
-            storedRichText: legacyConv.storedRichText,
-            size: JSON.stringify(conversation).length
-          } : undefined
-        }
-      };
+          codeBlocks: msg.suggestedCodeBlocks,
+        });
+      }
     } else {
       const modernConv = conversation as any;
       const headers = modernConv.fullConversationHeadersOnly || [];
 
-      if (validatedInput.resolveBubbles) {
-        const resolvedMessages = [];
-        for (const header of headers.slice(0, 10)) {
-          try {
-            const bubbleMessage = await reader.getBubbleMessage(modernConv.composerId, header.bubbleId);
-            if (bubbleMessage) {
-              resolvedMessages.push({
-                type: header.type,
-                text: bubbleMessage.text,
-                bubbleId: header.bubbleId,
-                relevantFiles: validatedInput.includeFileReferences ? bubbleMessage.relevantFiles : undefined,
-                attachedFolders: validatedInput.includeFileReferences ? bubbleMessage.attachedFoldersNew : undefined,
-                codeBlocks: validatedInput.includeCodeBlocks ? bubbleMessage.suggestedCodeBlocks : undefined
-              });
-            }
-          } catch (error) {
-            console.error(`Failed to resolve bubble ${header.bubbleId}:`, error);
+      // Resolve all bubble messages for the file
+      for (const header of headers) {
+        try {
+          const bubbleMessage = await reader.getBubbleMessage(modernConv.composerId, header.bubbleId);
+          if (bubbleMessage) {
+            messages.push({
+              type: header.type,
+              text: bubbleMessage.text,
+              bubbleId: header.bubbleId,
+              codeBlocks: bubbleMessage.suggestedCodeBlocks,
+            });
           }
+        } catch {
+          // Skip failed bubbles
         }
-
-        return {
-          conversation: {
-            composerId: modernConv.composerId,
-            format: 'modern',
-            messageCount: headers.length,
-            title: summary?.title,
-            aiGeneratedSummary: summary?.aiGeneratedSummary,
-            messages: resolvedMessages,
-            metadata: validatedInput.includeMetadata ? {
-              hasLoaded: true,
-              storedSummary: modernConv.storedSummary,
-              storedRichText: modernConv.storedRichText,
-              size: JSON.stringify(conversation).length
-            } : undefined
-          }
-        };
-      } else {
-        return {
-          conversation: {
-            composerId: modernConv.composerId,
-            format: 'modern',
-            messageCount: headers.length,
-            title: summary?.title,
-            aiGeneratedSummary: summary?.aiGeneratedSummary,
-            metadata: validatedInput.includeMetadata ? {
-              hasLoaded: true,
-              storedSummary: modernConv.storedSummary,
-              storedRichText: modernConv.storedRichText,
-              size: JSON.stringify(conversation).length
-            } : undefined
-          }
-        };
       }
     }
 
+    // Write to context file
+    const { filePath, stats } = writeConversationFile(validatedInput.conversationId, {
+      title: summary?.title,
+      aiGeneratedSummary: summary?.aiGeneratedSummary,
+      relevantFiles: summary?.relevantFiles,
+      messages,
+    });
+
+    return {
+      filePath,
+      stats,
+      guidance: `Conversation written to ${filePath}. Use Read tool to view specific sections or Grep to search for patterns. File has ${stats.messageCount} messages, ${stats.codeBlockCount} code blocks, ${stats.totalLines} lines (${stats.fileSize}).`,
+    };
+
   } finally {
-    // Always close the database connection
     reader.close();
   }
 }
