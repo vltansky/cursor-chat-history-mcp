@@ -5,15 +5,17 @@
  */
 
 import { installCursorHook } from './commands/install-cursor-hook.js';
+import { installClaudeHook } from './commands/install-claude-hook.js';
 import { installGitHook } from './commands/install-git-hook.js';
 import { captureHook } from './commands/capture-hook.js';
 import { recordCommit } from './commands/commit.js';
 import { manualLink } from './commands/manual-link.js';
 import { listConversationLinks, getCommitLinks } from './commands/query.js';
-import type { LinkCommandResult } from './types.js';
+import type { LinkCommandResult, AgentName } from './types.js';
 
 type SubCommand =
   | 'install-cursor-hook'
+  | 'install-claude-hook'
   | 'install-git-hook'
   | 'capture-hook'
   | 'commit'
@@ -49,11 +51,13 @@ cursor-chat-history-mcp link <command> [options]
 
 Commands:
   install-cursor-hook    Install Cursor hook for capturing file edits and session end
+  install-claude-hook    Install Claude Code hook for capturing session events
   install-git-hook       Install git post-commit hook for recording commits
     --repo <path>        Path to git repository (default: current directory)
 
   capture-hook           Process hook payload from stdin (called by hooks)
-    --event <name>       Hook event type (afterFileEdit, stop)
+    --event <name>       Hook event type (afterFileEdit, stop, SessionEnd, Stop)
+    --agent <name>       Agent name (cursor, claude-code)
 
   commit                 Record a git commit and auto-link to conversations
     --repo <path>        Path to git repository (default: current directory)
@@ -90,6 +94,9 @@ async function runCommand(command: SubCommand, options: Record<string, string | 
     case 'install-cursor-hook':
       return installCursorHook();
 
+    case 'install-claude-hook':
+      return installClaudeHook();
+
     case 'install-git-hook':
       return installGitHook({
         repoPath: typeof options.repo === 'string' ? options.repo : undefined,
@@ -99,7 +106,10 @@ async function runCommand(command: SubCommand, options: Record<string, string | 
       if (typeof options.event !== 'string') {
         return { success: false, message: 'Missing --event parameter' };
       }
-      return captureHook({ event: options.event as any });
+      return captureHook({
+        event: options.event as any,
+        agent: (typeof options.agent === 'string' ? options.agent : 'cursor') as AgentName,
+      });
 
     case 'commit':
       return recordCommit({

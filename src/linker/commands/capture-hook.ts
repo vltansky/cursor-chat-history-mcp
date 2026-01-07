@@ -1,14 +1,15 @@
 /**
- * Process hook payloads from Cursor hooks
- * Handles afterFileEdit and stop events
+ * Process hook payloads from Cursor and Claude Code hooks
+ * Handles afterFileEdit, stop, SessionEnd, and Stop events
  */
 
 import { resolve, dirname, basename } from 'path';
 import { existsSync, statSync } from 'fs';
 import { LinksDatabase } from '../links-database.js';
 import { CursorDatabaseReader } from '../../database/reader.js';
+import { ClaudeCodeReader } from '../../database/claude-code-reader.js';
 import { detectCursorDatabasePath } from '../../utils/database-utils.js';
-import type { LinkCommandResult, HookEventType, HookPayload } from '../types.js';
+import type { LinkCommandResult, HookEventType, CursorHookPayload, AgentName } from '../types.js';
 
 /**
  * Read JSON payload from stdin
@@ -79,30 +80,48 @@ function normalizeFilePath(filePath: string, workspaceRoot: string): string {
 
 export async function captureHook(options: {
   event: HookEventType;
+  agent?: AgentName;
 }): Promise<LinkCommandResult> {
   const linksDb = new LinksDatabase();
+  const agent = options.agent ?? 'cursor';
 
   try {
     await linksDb.connect();
 
     // Read payload from stdin
     const stdinData = await readStdin();
-    let payload: HookPayload = { event: options.event };
+    let payload: Record<string, unknown> = {};
 
     if (stdinData.trim()) {
       try {
-        payload = { ...JSON.parse(stdinData), event: options.event };
+        payload = JSON.parse(stdinData);
       } catch {
-        // If parsing fails, continue with minimal payload
+        // If parsing fails, continue with empty payload
       }
     }
 
+    // Route to appropriate handler based on agent and event
+    if (agent === 'claude-code') {
+      switch (options.event) {
+        case 'SessionEnd':
+        case 'Stop':
+          return handleClaudeCodeStop(linksDb, payload);
+
+        default:
+          return {
+            success: true,
+            message: `Ignored unknown Claude Code event: ${options.event}`,
+          };
+      }
+    }
+
+    // Cursor events (default)
     switch (options.event) {
       case 'afterFileEdit':
-        return handleAfterFileEdit(linksDb, payload);
+        return handleAfterFileEdit(linksDb, payload as Partial<CursorHookPayload>, agent);
 
       case 'stop':
-        return handleStop(linksDb, payload);
+        return handleStop(linksDb, payload as Partial<CursorHookPayload>, agent);
 
       default:
         return {
@@ -117,26 +136,35 @@ export async function captureHook(options: {
 
 /**
  * Handle afterFileEdit event - capture file paths being edited
+ * Cursor payload: { conversation_id, file_path, edits, workspace_roots, ... }
  */
 async function handleAfterFileEdit(
   linksDb: LinksDatabase,
-  payload: HookPayload
+  payload: Partial<CursorHookPayload>,
+  agent: 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue'
 ): Promise<LinkCommandResult> {
-  const files = payload.files ?? [];
-  const workspaceRoot = payload.workspaceRoot;
-  const conversationId = payload.conversationId;
+  const conversationId = payload.conversation_id;
+  const filePath = payload.file_path;
+  const workspaceRoots = payload.workspace_roots ?? [];
 
-  if (!conversationId || files.length === 0) {
+  if (!conversationId) {
     return {
       success: true,
-      message: 'No files or conversation to capture',
+      message: 'No conversation_id in payload',
     };
   }
 
-  // Determine workspace root from files if not provided
-  let effectiveWorkspace = workspaceRoot;
-  if (!effectiveWorkspace && files.length > 0) {
-    effectiveWorkspace = findRepoRoot(files[0]) ?? dirname(files[0]);
+  if (!filePath) {
+    return {
+      success: true,
+      message: 'No file_path in payload',
+    };
+  }
+
+  // Determine workspace root from payload or file path
+  let effectiveWorkspace = workspaceRoots[0];
+  if (!effectiveWorkspace) {
+    effectiveWorkspace = findRepoRoot(filePath) ?? dirname(filePath);
   }
 
   if (!effectiveWorkspace) {
@@ -146,12 +174,13 @@ async function handleAfterFileEdit(
     };
   }
 
-  // Normalize file paths
-  const normalizedFiles = files.map(f => normalizeFilePath(f, effectiveWorkspace!));
+  // Normalize file path
+  const normalizedFile = normalizeFilePath(filePath, effectiveWorkspace);
 
-  // Upsert conversation with captured files
+  // Upsert conversation with captured file
   linksDb.upsertConversation({
     conversationId,
+    agent,
     workspaceRoot: effectiveWorkspace,
     projectName: extractProjectName(effectiveWorkspace),
     title: null,
@@ -159,35 +188,37 @@ async function handleAfterFileEdit(
     aiSummary: null,
     relevantFiles: [],
     attachedFolders: [],
-    capturedFiles: normalizedFiles,
+    capturedFiles: [normalizedFile],
     searchableText: null,
     lastHookEvent: 'afterFileEdit',
   });
 
   return {
     success: true,
-    message: `Captured ${normalizedFiles.length} file(s) for conversation ${conversationId}`,
+    message: `Captured file ${normalizedFile} for conversation ${conversationId}`,
     data: {
       conversationId,
-      capturedFiles: normalizedFiles,
+      capturedFile: normalizedFile,
     },
   };
 }
 
 /**
  * Handle stop event - fetch conversation metadata and persist
+ * Cursor payload: { conversation_id, status, loop_count, workspace_roots, ... }
  */
 async function handleStop(
   linksDb: LinksDatabase,
-  payload: HookPayload
+  payload: Partial<CursorHookPayload>,
+  agent: 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue'
 ): Promise<LinkCommandResult> {
-  const conversationId = payload.conversationId;
-  const workspaceRoot = payload.workspaceRoot;
+  const conversationId = payload.conversation_id;
+  const workspaceRoots = payload.workspace_roots ?? [];
 
   if (!conversationId) {
     return {
       success: true,
-      message: 'No conversation ID provided',
+      message: 'No conversation_id in payload',
     };
   }
 
@@ -224,8 +255,8 @@ async function handleStop(
     // Cursor database access failed, continue with partial data
   }
 
-  // Determine workspace root from attached folders if not provided
-  let effectiveWorkspace = workspaceRoot;
+  // Determine workspace root from payload or attached folders
+  let effectiveWorkspace = workspaceRoots[0];
   if (!effectiveWorkspace && attachedFolders.length > 0) {
     effectiveWorkspace = findRepoRoot(attachedFolders[0]) ?? attachedFolders[0];
   }
@@ -246,6 +277,7 @@ async function handleStop(
   // Upsert conversation with full metadata
   linksDb.upsertConversation({
     conversationId,
+    agent,
     workspaceRoot: effectiveWorkspace,
     projectName: extractProjectName(effectiveWorkspace),
     title,
@@ -267,6 +299,144 @@ async function handleStop(
       aiSummary: aiSummary?.substring(0, 100) + (aiSummary && aiSummary.length > 100 ? '...' : ''),
       relevantFiles: normalizedRelevantFiles.length,
       attachedFolders: normalizedAttachedFolders.length,
+    },
+  };
+}
+
+/**
+ * Claude Code hook payload structure
+ */
+type ClaudeCodeHookPayload = {
+  session_id?: string;
+  cwd?: string;
+  transcript?: Array<{
+    type: 'user' | 'assistant';
+    message: {
+      content: string | Array<{ type: string; text?: string }>;
+    };
+  }>;
+  [key: string]: unknown;
+};
+
+/**
+ * Handle Claude Code SessionEnd/Stop events
+ * Payload contains session_id, cwd, and transcript
+ */
+async function handleClaudeCodeStop(
+  linksDb: LinksDatabase,
+  payload: Record<string, unknown>
+): Promise<LinkCommandResult> {
+  const claudePayload = payload as Partial<ClaudeCodeHookPayload>;
+
+  // Try to get session info from payload or read from files
+  const sessionId = claudePayload.session_id;
+  const cwd = claudePayload.cwd;
+
+  if (!sessionId && !cwd) {
+    // Try to find the most recent conversation from Claude Code reader
+    try {
+      const reader = new ClaudeCodeReader();
+      if (await reader.isAvailable()) {
+        const conversations = await reader.getConversationsByProject(process.cwd());
+        if (conversations.length > 0) {
+          const latest = conversations[0];
+          linksDb.upsertConversation({
+            conversationId: latest.conversationId,
+            agent: 'claude-code',
+            workspaceRoot: latest.projectPath ?? process.cwd(),
+            projectName: extractProjectName(latest.projectPath ?? process.cwd()),
+            title: latest.title ?? null,
+            summary: null,
+            aiSummary: null,
+            relevantFiles: latest.files,
+            attachedFolders: [],
+            capturedFiles: [],
+            searchableText: latest.messages.map(m => m.content).join(' ').substring(0, 10000),
+            lastHookEvent: 'SessionEnd',
+          });
+
+          return {
+            success: true,
+            message: `Captured Claude Code session ${latest.conversationId}`,
+            data: {
+              conversationId: latest.conversationId,
+              title: latest.title,
+              messageCount: latest.messages.length,
+              files: latest.files.length,
+            },
+          };
+        }
+      }
+    } catch {
+      // Reader failed, try fallback
+    }
+
+    return {
+      success: true,
+      message: 'No session_id or cwd in Claude Code payload',
+    };
+  }
+
+  const conversationId = `claude-code:${sessionId ?? 'unknown'}`;
+  const workspaceRoot = cwd ?? process.cwd();
+
+  // Extract message content from transcript if available
+  let searchableText = '';
+  let title: string | null = null;
+  const files: string[] = [];
+
+  if (claudePayload.transcript && Array.isArray(claudePayload.transcript)) {
+    for (const entry of claudePayload.transcript) {
+      if (entry.type === 'user' && !title) {
+        const content = typeof entry.message.content === 'string'
+          ? entry.message.content
+          : entry.message.content
+              .filter((b): b is { type: string; text: string } => b.type === 'text' && !!b.text)
+              .map(b => b.text)
+              .join('\n');
+        if (content) {
+          title = content.substring(0, 100);
+        }
+      }
+
+      const content = typeof entry.message.content === 'string'
+        ? entry.message.content
+        : entry.message.content
+            .filter((b): b is { type: string; text: string } => b.type === 'text' && !!b.text)
+            .map(b => b.text)
+            .join('\n');
+
+      if (content) {
+        searchableText += content + '\n';
+      }
+    }
+  }
+
+  // Normalize file paths
+  const normalizedFiles = files.map(f => normalizeFilePath(f, workspaceRoot));
+
+  linksDb.upsertConversation({
+    conversationId,
+    agent: 'claude-code',
+    workspaceRoot,
+    projectName: extractProjectName(workspaceRoot),
+    title,
+    summary: null,
+    aiSummary: null,
+    relevantFiles: normalizedFiles,
+    attachedFolders: [],
+    capturedFiles: [],
+    searchableText: searchableText.substring(0, 10000) || null,
+    lastHookEvent: 'SessionEnd',
+  });
+
+  return {
+    success: true,
+    message: `Captured Claude Code session end for ${conversationId}`,
+    data: {
+      conversationId,
+      title,
+      workspaceRoot,
     },
   };
 }

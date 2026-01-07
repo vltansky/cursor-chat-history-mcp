@@ -28,6 +28,7 @@ export {
 
 // Commands (for direct use)
 export { installCursorHook } from './commands/install-cursor-hook.js';
+export { installClaudeHook } from './commands/install-claude-hook.js';
 export { installGitHook } from './commands/install-git-hook.js';
 export { captureHook } from './commands/capture-hook.js';
 export { recordCommit } from './commands/commit.js';

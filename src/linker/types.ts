@@ -2,9 +2,13 @@
  * Types for the Conversation ↔ Git Linker feature
  */
 
+// Supported AI agents
+export type AgentName = 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue';
+
 // Database record types
 export type ConversationRecord = {
   conversationId: string;
+  agent: AgentName;
   workspaceRoot: string;
   projectName: string;
   title: string | null;
@@ -41,8 +45,44 @@ export type LinkRecord = {
 };
 
 // Hook event types
-export type HookEventType = 'afterFileEdit' | 'stop' | 'beforeSubmitPrompt';
+// Cursor events: afterFileEdit, stop, beforeSubmitPrompt
+// Claude Code events: PreToolUse, PostToolUse, Stop, SubagentStop, SessionStart, SessionEnd, UserPromptSubmit, PreCompact, Notification
+export type HookEventType =
+  | 'afterFileEdit'
+  | 'stop'
+  | 'beforeSubmitPrompt'
+  // Claude Code events
+  | 'PreToolUse'
+  | 'PostToolUse'
+  | 'Stop'
+  | 'SubagentStop'
+  | 'SessionStart'
+  | 'SessionEnd'
+  | 'UserPromptSubmit'
+  | 'PreCompact'
+  | 'Notification';
 
+// Cursor's actual hook payload format (uses snake_case)
+export type CursorHookPayload = {
+  // Common fields from all hooks
+  conversation_id: string;
+  generation_id: string;
+  model: string;
+  hook_event_name: string;
+  cursor_version: string;
+  workspace_roots: string[];
+  user_email: string | null;
+
+  // afterFileEdit specific
+  file_path?: string;
+  edits?: Array<{ old_string: string; new_string: string }>;
+
+  // stop specific
+  status?: 'completed' | 'aborted' | 'error';
+  loop_count?: number;
+};
+
+// Legacy payload type (keeping for backwards compat)
 export type HookPayload = {
   event: HookEventType;
   conversationId?: string;

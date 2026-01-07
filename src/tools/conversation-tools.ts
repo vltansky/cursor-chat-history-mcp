@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { CursorDatabaseReader } from '../database/reader.js';
+import { ClaudeCodeReader } from '../database/claude-code-reader.js';
 import type { BubbleMessage, ConversationFilters } from '../database/types.js';
+import type { AgentName } from '../database/agent-types.js';
 import { detectCursorDatabasePath } from '../utils/database-utils.js';
 import { writeConversationFile, type ConversationFileStats } from '../utils/context-files.js';
 
@@ -17,7 +19,8 @@ export const listConversationsSchema = z.object({
   relevantFiles: z.array(z.string()).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
-  includeAiSummaries: z.boolean().optional().default(true)
+  includeAiSummaries: z.boolean().optional().default(true),
+  agent: z.enum(['cursor', 'claude-code', 'all']).optional().default('all')
 });
 
 export type ListConversationsInput = z.infer<typeof listConversationsSchema>;
@@ -26,7 +29,8 @@ export type ListConversationsInput = z.infer<typeof listConversationsSchema>;
 export interface ListConversationsOutput {
   conversations: Array<{
     composerId: string;
-    format: 'legacy' | 'modern';
+    agent: AgentName;
+    format: 'legacy' | 'modern' | 'jsonl';
     messageCount: number;
     hasCodeBlocks: boolean;
     relevantFiles: string[];
@@ -47,15 +51,63 @@ export interface ListConversationsOutput {
     filePattern?: string;
     relevantFiles?: string[];
     includeAiSummaries?: boolean;
+    agent?: string;
   };
 }
 
 /**
- * List Cursor conversations with optional filters and ROWID-based ordering
+ * List conversations with optional filters and ROWID-based ordering
+ * Supports both Cursor and Claude Code agents
  */
 export async function listConversations(input: ListConversationsInput): Promise<ListConversationsOutput> {
   const validatedInput = listConversationsSchema.parse(input);
+  const agentFilter = validatedInput.agent ?? 'all';
 
+  const allConversations: ListConversationsOutput['conversations'] = [];
+  let totalFound = 0;
+
+  // Get Cursor conversations if requested
+  if (agentFilter === 'cursor' || agentFilter === 'all') {
+    const cursorResult = await listCursorConversations(validatedInput);
+    allConversations.push(...cursorResult.conversations);
+    totalFound += cursorResult.totalFound;
+  }
+
+  // Get Claude Code conversations if requested
+  if (agentFilter === 'claude-code' || agentFilter === 'all') {
+    const claudeResult = await listClaudeCodeConversations(validatedInput);
+    allConversations.push(...claudeResult.conversations);
+    totalFound += claudeResult.totalFound;
+  }
+
+  // Sort by size descending (approximation of recency)
+  allConversations.sort((a, b) => b.size - a.size);
+
+  // Apply limit
+  const limitedConversations = allConversations.slice(0, validatedInput.limit ?? 10);
+
+  return {
+    conversations: limitedConversations,
+    totalFound,
+    filters: {
+      limit: validatedInput.limit ?? 10,
+      minLength: validatedInput.minLength ?? 100,
+      format: validatedInput.format ?? 'both',
+      hasCodeBlocks: validatedInput.hasCodeBlocks,
+      keywords: validatedInput.keywords,
+      projectPath: validatedInput.projectPath,
+      filePattern: validatedInput.filePattern,
+      relevantFiles: validatedInput.relevantFiles,
+      includeAiSummaries: validatedInput.includeAiSummaries,
+      agent: agentFilter
+    }
+  };
+}
+
+/**
+ * List Cursor conversations
+ */
+async function listCursorConversations(validatedInput: ListConversationsInput): Promise<ListConversationsOutput> {
   const dbPath = process.env.CURSOR_DB_PATH || detectCursorDatabasePath();
   const reader = new CursorDatabaseReader({ dbPath });
 
@@ -99,15 +151,14 @@ export async function listConversations(input: ListConversationsInput): Promise<
           if (hasValidDate) {
             filteredIds.push(composerId);
           }
-        } catch (error) {
-          // Skip conversations that can't be processed
+        } catch {
           continue;
         }
       }
       limitedIds = filteredIds;
     }
 
-    const conversations = [];
+    const conversations: ListConversationsOutput['conversations'] = [];
     for (const composerId of limitedIds) {
       try {
         const summary = await reader.getConversationSummary(composerId, {
@@ -120,6 +171,7 @@ export async function listConversations(input: ListConversationsInput): Promise<
         if (summary) {
           conversations.push({
             composerId: summary.composerId,
+            agent: 'cursor',
             format: summary.format,
             messageCount: summary.messageCount,
             hasCodeBlocks: summary.hasCodeBlocks,
@@ -142,19 +194,88 @@ export async function listConversations(input: ListConversationsInput): Promise<
       filters: {
         limit: validatedInput.limit ?? 10,
         minLength: validatedInput.minLength ?? 100,
-        format: validatedInput.format ?? 'both',
-        hasCodeBlocks: validatedInput.hasCodeBlocks,
-        keywords: validatedInput.keywords,
-        projectPath: validatedInput.projectPath,
-        filePattern: validatedInput.filePattern,
-        relevantFiles: validatedInput.relevantFiles,
-        includeAiSummaries: validatedInput.includeAiSummaries
+        format: validatedInput.format ?? 'both'
       }
     };
 
   } finally {
-    // Always close the database connection
     reader.close();
+  }
+}
+
+/**
+ * List Claude Code conversations
+ */
+async function listClaudeCodeConversations(validatedInput: ListConversationsInput): Promise<ListConversationsOutput> {
+  const reader = new ClaudeCodeReader();
+
+  try {
+    if (!await reader.isAvailable()) {
+      return { conversations: [], totalFound: 0, filters: { limit: 10, minLength: 0, format: 'jsonl' } };
+    }
+
+    let conversations: ListConversationsOutput['conversations'] = [];
+
+    if (validatedInput.projectPath) {
+      const claudeConvs = await reader.getConversationsByProject(validatedInput.projectPath);
+      for (const conv of claudeConvs) {
+        conversations.push({
+          composerId: conv.conversationId,
+          agent: 'claude-code',
+          format: 'jsonl',
+          messageCount: conv.messages.length,
+          hasCodeBlocks: conv.messages.some(m => m.codeBlocks && m.codeBlocks.length > 0),
+          relevantFiles: conv.files,
+          attachedFolders: conv.folders ?? [],
+          firstMessage: conv.messages[0]?.content?.substring(0, 150),
+          title: conv.title,
+          aiGeneratedSummary: undefined,
+          size: JSON.stringify(conv).length
+        });
+      }
+    } else {
+      const convIds = await reader.getConversationIds();
+      for (const convId of convIds.slice(0, validatedInput.limit ?? 10)) {
+        const conv = await reader.getConversation(convId);
+        if (conv) {
+          conversations.push({
+            composerId: conv.conversationId,
+            agent: 'claude-code',
+            format: 'jsonl',
+            messageCount: conv.messages.length,
+            hasCodeBlocks: conv.messages.some(m => m.codeBlocks && m.codeBlocks.length > 0),
+            relevantFiles: conv.files,
+            attachedFolders: conv.folders ?? [],
+            firstMessage: conv.messages[0]?.content?.substring(0, 150),
+            title: conv.title,
+            aiGeneratedSummary: undefined,
+            size: JSON.stringify(conv).length
+          });
+        }
+      }
+    }
+
+    // Apply keyword filter if specified
+    if (validatedInput.keywords && validatedInput.keywords.length > 0) {
+      conversations = conversations.filter(conv => {
+        const text = [conv.title, conv.firstMessage, conv.aiGeneratedSummary].filter(Boolean).join(' ').toLowerCase();
+        return validatedInput.keywords!.some(kw => text.includes(kw.toLowerCase()));
+      });
+    }
+
+    return {
+      conversations,
+      totalFound: conversations.length,
+      filters: {
+        limit: validatedInput.limit ?? 10,
+        minLength: validatedInput.minLength ?? 0,
+        format: 'jsonl'
+      }
+    };
+
+  } catch (error) {
+    console.error('Failed to list Claude Code conversations:', error);
+    return { conversations: [], totalFound: 0, filters: { limit: 10, minLength: 0, format: 'jsonl' } };
   }
 }
 

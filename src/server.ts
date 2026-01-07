@@ -139,7 +139,8 @@ server.tool(
           startDate: input.startDate,
           endDate: input.endDate,
           includeEmpty: input.includeEmpty,
-          includeAiSummaries: input.includeAiSummaries
+          includeAiSummaries: input.includeAiSummaries,
+          agent: 'all' as const
         };
 
         const result = await listConversations(mappedInput);

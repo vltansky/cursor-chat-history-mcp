@@ -7,23 +7,32 @@ import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'fs';
 import type { LinkCommandResult } from '../types.js';
 
+// Hook script reads JSON from stdin, extracts hook_event_name, passes to CLI
 const HOOK_SCRIPT = `#!/bin/bash
 # Cursor Chat History Linker Hook Script
-# Captures file edits and session end events
+# Reads JSON payload from stdin, passes to linker CLI
 
-EVENT="$1"
-shift
+# Read entire stdin into variable
+PAYLOAD=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+  PAYLOAD="$PAYLOAD$line"
+done
 
-# Run the linker capture-hook command with the event
-# Pass stdin (payload) to the command
-npx --yes cursor-chat-history-mcp link capture-hook --event "$EVENT"
+# Extract hook_event_name from JSON
+EVENT=$(echo "$PAYLOAD" | grep -o '"hook_event_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# Pass payload to linker CLI
+echo "$PAYLOAD" | npx --yes cursor-chat-history-mcp link capture-hook --event "$EVENT"
 `;
 
+type HookEntry = { command: string };
+
 type HooksConfig = {
+  version?: number;
   hooks?: {
-    afterFileEdit?: string[];
-    stop?: string[];
-    [key: string]: string[] | undefined;
+    afterFileEdit?: HookEntry[];
+    stop?: HookEntry[];
+    [key: string]: HookEntry[] | undefined;
   };
 };
 
@@ -55,30 +64,40 @@ export async function installCursorHook(): Promise<LinkCommandResult> {
       }
     }
 
-    // Ensure hooks object exists
+    // Ensure config structure
+    if (!hooksConfig.version) {
+      hooksConfig.version = 1;
+    }
     if (!hooksConfig.hooks) {
       hooksConfig.hooks = {};
     }
 
-    // Add our script to afterFileEdit and stop hooks
-    const scriptCommand = `${scriptPath} afterFileEdit`;
-    const stopCommand = `${scriptPath} stop`;
+    // Hook entry format per Cursor docs
+    const hookEntry: HookEntry = { command: scriptPath };
 
-    // afterFileEdit hook
-    if (!hooksConfig.hooks.afterFileEdit) {
-      hooksConfig.hooks.afterFileEdit = [];
-    }
-    if (!hooksConfig.hooks.afterFileEdit.includes(scriptCommand)) {
-      hooksConfig.hooks.afterFileEdit.push(scriptCommand);
-    }
+    // Helper to clean up old entries (string format or pointing to our script)
+    const cleanOldEntries = (arr: unknown[] | undefined): HookEntry[] => {
+      if (!arr) return [];
+      return arr.filter((entry): entry is HookEntry => {
+        // Skip string entries (old format)
+        if (typeof entry === 'string') {
+          return !entry.includes('cursor-history-link.sh');
+        }
+        // Skip object entries pointing to our script
+        if (typeof entry === 'object' && entry && 'command' in entry) {
+          return !(entry as HookEntry).command.includes('cursor-history-link.sh');
+        }
+        return true;
+      });
+    };
 
-    // stop hook
-    if (!hooksConfig.hooks.stop) {
-      hooksConfig.hooks.stop = [];
-    }
-    if (!hooksConfig.hooks.stop.includes(stopCommand)) {
-      hooksConfig.hooks.stop.push(stopCommand);
-    }
+    // Clean and register afterFileEdit hook
+    hooksConfig.hooks.afterFileEdit = cleanOldEntries(hooksConfig.hooks.afterFileEdit);
+    hooksConfig.hooks.afterFileEdit.push(hookEntry);
+
+    // Clean and register stop hook
+    hooksConfig.hooks.stop = cleanOldEntries(hooksConfig.hooks.stop);
+    hooksConfig.hooks.stop.push(hookEntry);
 
     // Write updated hooks.json
     writeFileSync(hooksJsonPath, JSON.stringify(hooksConfig, null, 2), 'utf-8');

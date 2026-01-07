@@ -83,6 +83,7 @@ export class LinksDatabase {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
         conversationId TEXT PRIMARY KEY,
+        agent TEXT NOT NULL DEFAULT 'cursor',
         workspaceRoot TEXT NOT NULL,
         projectName TEXT NOT NULL,
         title TEXT,
@@ -123,6 +124,7 @@ export class LinksDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspaceRoot);
       CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(projectName);
+      CREATE INDEX IF NOT EXISTS idx_conversations_agent ON conversations(agent);
       CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repoPath);
       CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(committedAt);
       CREATE INDEX IF NOT EXISTS idx_links_conversation ON links(conversationId);
@@ -157,10 +159,11 @@ export class LinksDatabase {
 
     const simpleStmt = this.db!.prepare(`
       INSERT INTO conversations (
-        conversationId, workspaceRoot, projectName, title, summary, aiSummary,
+        conversationId, agent, workspaceRoot, projectName, title, summary, aiSummary,
         relevantFiles, attachedFolders, capturedFiles, searchableText, createdAt, updatedAt, lastHookEvent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(conversationId) DO UPDATE SET
+        agent = excluded.agent,
         workspaceRoot = excluded.workspaceRoot,
         projectName = excluded.projectName,
         title = COALESCE(excluded.title, conversations.title),
@@ -176,6 +179,7 @@ export class LinksDatabase {
 
     simpleStmt.run(
       conv.conversationId,
+      conv.agent ?? 'cursor',
       conv.workspaceRoot,
       conv.projectName,
       conv.title,
@@ -218,6 +222,7 @@ export class LinksDatabase {
     workspaceRoot?: string;
     projectName?: string;
     file?: string;
+    agent?: string;
     limit?: number;
   }): ConversationRecord[] {
     this.ensureConnected();
@@ -239,6 +244,11 @@ export class LinksDatabase {
       sql += ' AND (relevantFiles LIKE ? OR capturedFiles LIKE ?)';
       const pattern = `%${options.file}%`;
       params.push(pattern, pattern);
+    }
+
+    if (options.agent) {
+      sql += ' AND agent = ?';
+      params.push(options.agent);
     }
 
     sql += ' ORDER BY updatedAt DESC';
@@ -458,6 +468,7 @@ export class LinksDatabase {
       },
       conversation: {
         conversationId: row.conversationId,
+        agent: row.agent ?? 'cursor',
         workspaceRoot: row.workspaceRoot,
         projectName: row.projectName,
         title: row.title,
