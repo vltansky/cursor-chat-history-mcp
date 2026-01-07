@@ -5,11 +5,19 @@ import type { BubbleMessage, ConversationFilters } from '../database/types.js';
 import type { AgentName } from '../database/agent-types.js';
 import { detectCursorDatabasePath } from '../utils/database-utils.js';
 import { writeConversationFile, type ConversationFileStats } from '../utils/context-files.js';
+import { calculateQualityScore, type QualityScore } from '../utils/quality.js';
+import {
+  listFromAllAgents,
+  includesCursor,
+  type AgentFilter,
+  type ConversationListItem,
+} from './agent-list-utils.js';
 
 // Input schema for list_conversations tool
 export const listConversationsSchema = z.object({
   limit: z.number().min(1).max(1000).optional(),
   minLength: z.number().min(0).optional(),
+  minQualityScore: z.number().min(0).max(100).optional(),
   keywords: z.array(z.string()).optional(),
   hasCodeBlocks: z.boolean().optional(),
   format: z.enum(['legacy', 'modern', 'both']).optional(),
@@ -20,7 +28,8 @@ export const listConversationsSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   includeAiSummaries: z.boolean().optional().default(true),
-  agent: z.enum(['cursor', 'claude-code', 'all']).optional().default('all')
+  includeQualityScore: z.boolean().optional().default(false),
+  agent: z.enum(['cursor', 'claude-code', 'cline', 'windsurf', 'copilot-chat', 'all']).optional().default('all')
 });
 
 export type ListConversationsInput = z.infer<typeof listConversationsSchema>;
@@ -39,11 +48,14 @@ export interface ListConversationsOutput {
     title?: string;
     aiGeneratedSummary?: string;
     size: number;
+    qualityScore?: number;
+    qualityFactors?: QualityScore['factors'];
   }>;
   totalFound: number;
   filters: {
     limit: number;
     minLength: number;
+    minQualityScore?: number;
     format: string;
     hasCodeBlocks?: boolean;
     keywords?: string[];
@@ -51,34 +63,37 @@ export interface ListConversationsOutput {
     filePattern?: string;
     relevantFiles?: string[];
     includeAiSummaries?: boolean;
+    includeQualityScore?: boolean;
     agent?: string;
   };
 }
 
 /**
  * List conversations with optional filters and ROWID-based ordering
- * Supports both Cursor and Claude Code agents
+ * Supports Cursor, Claude Code, Cline/Roo/Kilo, Windsurf, and Copilot Chat
  */
 export async function listConversations(input: ListConversationsInput): Promise<ListConversationsOutput> {
   const validatedInput = listConversationsSchema.parse(input);
-  const agentFilter = validatedInput.agent ?? 'all';
+  const agentFilter = (validatedInput.agent ?? 'all') as AgentFilter;
 
   const allConversations: ListConversationsOutput['conversations'] = [];
   let totalFound = 0;
 
-  // Get Cursor conversations if requested
-  if (agentFilter === 'cursor' || agentFilter === 'all') {
+  // Get Cursor conversations (special handling due to SQLite + quality scoring)
+  if (includesCursor(agentFilter)) {
     const cursorResult = await listCursorConversations(validatedInput);
     allConversations.push(...cursorResult.conversations);
     totalFound += cursorResult.totalFound;
   }
 
-  // Get Claude Code conversations if requested
-  if (agentFilter === 'claude-code' || agentFilter === 'all') {
-    const claudeResult = await listClaudeCodeConversations(validatedInput);
-    allConversations.push(...claudeResult.conversations);
-    totalFound += claudeResult.totalFound;
-  }
+  // Get all other agent conversations via generic loader
+  const otherAgentsResult = await listFromAllAgents(agentFilter, {
+    projectPath: validatedInput.projectPath,
+    keywords: validatedInput.keywords,
+    limit: validatedInput.limit,
+  });
+  allConversations.push(...otherAgentsResult.conversations);
+  totalFound += otherAgentsResult.totalFound;
 
   // Sort by size descending (approximation of recency)
   allConversations.sort((a, b) => b.size - a.size);
@@ -165,10 +180,27 @@ async function listCursorConversations(validatedInput: ListConversationsInput): 
           includeFirstMessage: true,
           maxFirstMessageLength: 150,
           includeTitle: true,
-          includeAIGeneratedSummary: validatedInput.includeAiSummaries
+          includeAIGeneratedSummary: validatedInput.includeAiSummaries,
+          includeCodeBlockCount: true
         });
 
         if (summary) {
+          // Calculate quality score if needed
+          let qualityResult: QualityScore | undefined;
+          if (validatedInput.includeQualityScore || validatedInput.minQualityScore) {
+            qualityResult = calculateQualityScore({
+              messageCount: summary.messageCount,
+              hasCodeBlocks: summary.hasCodeBlocks,
+              codeBlockCount: summary.codeBlockCount,
+              relevantFiles: summary.relevantFiles,
+            });
+
+            // Skip if below minimum quality threshold
+            if (validatedInput.minQualityScore && qualityResult.score < validatedInput.minQualityScore) {
+              continue;
+            }
+          }
+
           conversations.push({
             composerId: summary.composerId,
             agent: 'cursor',
@@ -180,7 +212,9 @@ async function listCursorConversations(validatedInput: ListConversationsInput): 
             firstMessage: summary.firstMessage,
             title: summary.title,
             aiGeneratedSummary: summary.aiGeneratedSummary,
-            size: summary.conversationSize
+            size: summary.conversationSize,
+            qualityScore: validatedInput.includeQualityScore ? qualityResult?.score : undefined,
+            qualityFactors: validatedInput.includeQualityScore ? qualityResult?.factors : undefined,
           });
         }
       } catch (error) {
@@ -194,7 +228,9 @@ async function listCursorConversations(validatedInput: ListConversationsInput): 
       filters: {
         limit: validatedInput.limit ?? 10,
         minLength: validatedInput.minLength ?? 100,
-        format: validatedInput.format ?? 'both'
+        minQualityScore: validatedInput.minQualityScore,
+        format: validatedInput.format ?? 'both',
+        includeQualityScore: validatedInput.includeQualityScore,
       }
     };
 
@@ -203,81 +239,6 @@ async function listCursorConversations(validatedInput: ListConversationsInput): 
   }
 }
 
-/**
- * List Claude Code conversations
- */
-async function listClaudeCodeConversations(validatedInput: ListConversationsInput): Promise<ListConversationsOutput> {
-  const reader = new ClaudeCodeReader();
-
-  try {
-    if (!await reader.isAvailable()) {
-      return { conversations: [], totalFound: 0, filters: { limit: 10, minLength: 0, format: 'jsonl' } };
-    }
-
-    let conversations: ListConversationsOutput['conversations'] = [];
-
-    if (validatedInput.projectPath) {
-      const claudeConvs = await reader.getConversationsByProject(validatedInput.projectPath);
-      for (const conv of claudeConvs) {
-        conversations.push({
-          composerId: conv.conversationId,
-          agent: 'claude-code',
-          format: 'jsonl',
-          messageCount: conv.messages.length,
-          hasCodeBlocks: conv.messages.some(m => m.codeBlocks && m.codeBlocks.length > 0),
-          relevantFiles: conv.files,
-          attachedFolders: conv.folders ?? [],
-          firstMessage: conv.messages[0]?.content?.substring(0, 150),
-          title: conv.title,
-          aiGeneratedSummary: undefined,
-          size: JSON.stringify(conv).length
-        });
-      }
-    } else {
-      const convIds = await reader.getConversationIds();
-      for (const convId of convIds.slice(0, validatedInput.limit ?? 10)) {
-        const conv = await reader.getConversation(convId);
-        if (conv) {
-          conversations.push({
-            composerId: conv.conversationId,
-            agent: 'claude-code',
-            format: 'jsonl',
-            messageCount: conv.messages.length,
-            hasCodeBlocks: conv.messages.some(m => m.codeBlocks && m.codeBlocks.length > 0),
-            relevantFiles: conv.files,
-            attachedFolders: conv.folders ?? [],
-            firstMessage: conv.messages[0]?.content?.substring(0, 150),
-            title: conv.title,
-            aiGeneratedSummary: undefined,
-            size: JSON.stringify(conv).length
-          });
-        }
-      }
-    }
-
-    // Apply keyword filter if specified
-    if (validatedInput.keywords && validatedInput.keywords.length > 0) {
-      conversations = conversations.filter(conv => {
-        const text = [conv.title, conv.firstMessage, conv.aiGeneratedSummary].filter(Boolean).join(' ').toLowerCase();
-        return validatedInput.keywords!.some(kw => text.includes(kw.toLowerCase()));
-      });
-    }
-
-    return {
-      conversations,
-      totalFound: conversations.length,
-      filters: {
-        limit: validatedInput.limit ?? 10,
-        minLength: validatedInput.minLength ?? 0,
-        format: 'jsonl'
-      }
-    };
-
-  } catch (error) {
-    console.error('Failed to list Claude Code conversations:', error);
-    return { conversations: [], totalFound: 0, filters: { limit: 10, minLength: 0, format: 'jsonl' } };
-  }
-}
 
 // Input schema for get_conversation tool
 export const getConversationSchema = z.object({

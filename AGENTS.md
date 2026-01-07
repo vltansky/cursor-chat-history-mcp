@@ -41,7 +41,7 @@ Use npm for package management
 - Use barrel exports for clean public APIs
 
 ## Development Workflow
-- Build with `yarn build` before testing
+- Build with `npm run build` before testing
 - Use TypeScript for all new code
 - Follow patterns established in existing codebase
 

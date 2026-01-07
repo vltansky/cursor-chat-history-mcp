@@ -4,7 +4,7 @@
  */
 
 import { resolve, dirname, basename } from 'path';
-import { existsSync, statSync } from 'fs';
+import { existsSync, statSync, readFileSync } from 'fs';
 import { LinksDatabase } from '../links-database.js';
 import { CursorDatabaseReader } from '../../database/reader.js';
 import { ClaudeCodeReader } from '../../database/claude-code-reader.js';
@@ -14,19 +14,18 @@ import type { LinkCommandResult, HookEventType, CursorHookPayload, AgentName } f
 /**
  * Read JSON payload from stdin
  */
-async function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let data = '';
-    process.stdin.setEncoding('utf-8');
-    process.stdin.on('data', (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on('end', () => {
-      resolve(data);
-    });
-    // Set a timeout in case stdin is empty/not connected
-    setTimeout(() => resolve(data), 100);
-  });
+function readStdin(): string {
+  // Check if stdin is a TTY (no pipe)
+  if (process.stdin.isTTY) {
+    return '';
+  }
+
+  try {
+    // Use synchronous read for reliability with piped input
+    return readFileSync(0, 'utf-8');
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -79,7 +78,7 @@ function normalizeFilePath(filePath: string, workspaceRoot: string): string {
 }
 
 export async function captureHook(options: {
-  event: HookEventType;
+  event?: HookEventType;
   agent?: AgentName;
 }): Promise<LinkCommandResult> {
   const linksDb = new LinksDatabase();
@@ -88,8 +87,8 @@ export async function captureHook(options: {
   try {
     await linksDb.connect();
 
-    // Read payload from stdin
-    const stdinData = await readStdin();
+    // Read payload from stdin (synchronous for reliability)
+    const stdinData = readStdin();
     let payload: Record<string, unknown> = {};
 
     if (stdinData.trim()) {
@@ -100,9 +99,18 @@ export async function captureHook(options: {
       }
     }
 
+    // Get event from options or from payload
+    const event = options.event ?? (payload.hook_event_name as HookEventType);
+    if (!event) {
+      return {
+        success: false,
+        message: 'Missing event: provide --event or include hook_event_name in payload',
+      };
+    }
+
     // Route to appropriate handler based on agent and event
     if (agent === 'claude-code') {
-      switch (options.event) {
+      switch (event) {
         case 'SessionEnd':
         case 'Stop':
           return handleClaudeCodeStop(linksDb, payload);
@@ -110,13 +118,13 @@ export async function captureHook(options: {
         default:
           return {
             success: true,
-            message: `Ignored unknown Claude Code event: ${options.event}`,
+            message: `Ignored unknown Claude Code event: ${event}`,
           };
       }
     }
 
     // Cursor events (default)
-    switch (options.event) {
+    switch (event) {
       case 'afterFileEdit':
         return handleAfterFileEdit(linksDb, payload as Partial<CursorHookPayload>, agent);
 
@@ -126,7 +134,7 @@ export async function captureHook(options: {
       default:
         return {
           success: true,
-          message: `Ignored unknown event: ${options.event}`,
+          message: `Ignored unknown event: ${event}`,
         };
     }
   } finally {
@@ -141,7 +149,7 @@ export async function captureHook(options: {
 async function handleAfterFileEdit(
   linksDb: LinksDatabase,
   payload: Partial<CursorHookPayload>,
-  agent: 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue'
+  agent: AgentName
 ): Promise<LinkCommandResult> {
   const conversationId = payload.conversation_id;
   const filePath = payload.file_path;
@@ -210,7 +218,7 @@ async function handleAfterFileEdit(
 async function handleStop(
   linksDb: LinksDatabase,
   payload: Partial<CursorHookPayload>,
-  agent: 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue'
+  agent: AgentName
 ): Promise<LinkCommandResult> {
   const conversationId = payload.conversation_id;
   const workspaceRoots = payload.workspace_roots ?? [];

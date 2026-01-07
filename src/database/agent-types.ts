@@ -3,7 +3,7 @@
  * Abstracts away differences between Cursor, Claude Code, and other agents
  */
 
-export type AgentName = 'cursor' | 'claude-code' | 'codex' | 'aider' | 'continue';
+export type AgentName = 'cursor' | 'claude-code' | 'cline' | 'roo-code' | 'kilo-code' | 'codex' | 'aider' | 'continue' | 'windsurf' | 'copilot-chat';
 
 /**
  * Unified message structure across all agents

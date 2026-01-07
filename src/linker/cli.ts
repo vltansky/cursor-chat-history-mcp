@@ -11,7 +11,7 @@ import { captureHook } from './commands/capture-hook.js';
 import { recordCommit } from './commands/commit.js';
 import { manualLink } from './commands/manual-link.js';
 import { listConversationLinks, getCommitLinks } from './commands/query.js';
-import type { LinkCommandResult, AgentName } from './types.js';
+import type { LinkCommandResult, AgentName, HookEventType } from './types.js';
 
 type SubCommand =
   | 'install-cursor-hook'
@@ -103,11 +103,9 @@ async function runCommand(command: SubCommand, options: Record<string, string | 
       });
 
     case 'capture-hook':
-      if (typeof options.event !== 'string') {
-        return { success: false, message: 'Missing --event parameter' };
-      }
+      // Event is optional - can be extracted from stdin payload's hook_event_name
       return captureHook({
-        event: options.event as any,
+        event: typeof options.event === 'string' ? options.event as HookEventType : undefined,
         agent: (typeof options.agent === 'string' ? options.agent : 'cursor') as AgentName,
       });
 
@@ -185,3 +183,6 @@ export async function runLinkerCli(args: string[]): Promise<void> {
     process.exitCode = 1;
   }
 }
+
+// Run CLI when executed directly
+runLinkerCli(process.argv.slice(2));

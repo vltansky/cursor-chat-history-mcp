@@ -7,22 +7,13 @@ import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'fs';
 import type { LinkCommandResult } from '../types.js';
 
-// Hook script reads JSON from stdin, extracts hook_event_name, passes to CLI
+// Hook script passes stdin directly to the CLI without consuming it
 const HOOK_SCRIPT = `#!/bin/bash
 # Cursor Chat History Linker Hook Script
-# Reads JSON payload from stdin, passes to linker CLI
+# Passes stdin directly to linker CLI (don't consume stdin in shell)
 
-# Read entire stdin into variable
-PAYLOAD=""
-while IFS= read -r line || [[ -n "$line" ]]; do
-  PAYLOAD="$PAYLOAD$line"
-done
-
-# Extract hook_event_name from JSON
-EVENT=$(echo "$PAYLOAD" | grep -o '"hook_event_name":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-# Pass payload to linker CLI
-echo "$PAYLOAD" | npx --yes cursor-chat-history-mcp link capture-hook --event "$EVENT"
+# npx will read stdin directly
+npx --yes cursor-chat-history-mcp-link capture-hook 2>/dev/null || true
 `;
 
 type HookEntry = { command: string };

@@ -177,6 +177,25 @@ yarn install
 yarn build
 ```
 
+## Supported AI Assistants
+
+| Assistant | Status | Notes |
+|-----------|--------|-------|
+| **Cursor** | ✅ Full | Chat, Composer, Agent modes |
+| **Claude Code** | ✅ Full | VS Code extension |
+| **Cline/Roo/Kilo** | ✅ Full | JSON task-based storage |
+| **Windsurf** | ✅ Full | SQLite (same pattern as Cursor) |
+| **GitHub Copilot Chat** | ✅ Full | VS Code native |
+
+## Roadmap
+
+- [ ] **Knowledge graph extraction** - Extract entities and relationships from conversations ([learn more](docs/knowledge-graphs.md))
+- [x] **Multi-agent support** - Cline, Windsurf, Copilot Chat
+- [x] **Quality scoring** - Prioritize conversations with solutions
+- [x] **Natural time filters** - "last week", "yesterday"
+- [x] **Topic clustering** - Group by detected themes
+- [ ] **Semantic search** - Find similar conversations via embeddings
+
 ## Technical Notes
 
 - Supports legacy and modern Cursor conversation formats

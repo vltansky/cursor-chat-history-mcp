@@ -52,6 +52,7 @@ import { z } from 'zod';
 import { formatResponse } from './utils/formatter.js';
 import { autoInstallHooks } from './linker/auto-install.js';
 import { registerPrompts } from './prompts.js';
+import { parseTimeRange, isTimeExpression } from './utils/time-parser.js';
 
 // Handle CLI commands if 'link' subcommand is used
 const args = process.argv.slice(2);
@@ -72,24 +73,38 @@ const server = new McpServer({
 
 server.tool(
   'list_conversations',
-  'Lists Cursor chats with summaries, titles, and metadata ordered by recency. **HIGHLY RECOMMENDED: Use projectPath parameter to filter conversations by specific project/codebase** - this dramatically improves relevance by finding conversations that actually worked on files in that project. Returns conversation IDs for use with get_conversation tool. WORKFLOW TIP: Start with projectPath filtering for project-specific analysis, then call get_conversation with specific IDs from results. Includes AI-generated summaries by default. Supports date range filtering (YYYY-MM-DD format).',
+  'Lists Cursor chats with summaries, titles, and metadata ordered by recency. **HIGHLY RECOMMENDED: Use projectPath parameter to filter conversations by specific project/codebase** - this dramatically improves relevance by finding conversations that actually worked on files in that project. Returns conversation IDs for use with get_conversation tool. WORKFLOW TIP: Start with projectPath filtering for project-specific analysis, then call get_conversation with specific IDs from results. Includes AI-generated summaries by default. Supports natural time filtering ("last week", "yesterday", "past 3 days") or date range (YYYY-MM-DD format).',
   {
     limit: z.number().min(1).max(100).optional().default(10).describe('Maximum number of conversations to return (1-100)'),
     minLength: z.number().min(0).optional().default(100).describe('Minimum conversation length in characters to include'),
+    minQualityScore: z.number().min(0).max(100).optional().describe('Minimum quality score (0-100). Higher scores = conversations with code blocks, solutions, file refs, git links.'),
     hasCodeBlocks: z.boolean().optional().describe('Filter to conversations that contain code blocks'),
     keywords: z.array(z.string()).optional().describe('Filter conversations containing any of these exact keywords (literal text matching)'),
     projectPath: z.string().optional().describe('**RECOMMENDED** Filter conversations by project/codebase name (e.g., "my-app") or full path (e.g., "/Users/name/Projects/my-app"). This finds conversations that actually worked on files in that project, dramatically improving relevance for project-specific analysis.'),
     filePattern: z.string().optional().describe('Filter conversations mentioning files matching this pattern (e.g., "*.tsx")'),
     relevantFiles: z.array(z.string()).optional().describe('Filter conversations that reference any of these specific files'),
-    startDate: z.string().optional().describe('Start date for filtering (YYYY-MM-DD). Note: Timestamps may be unreliable.'),
-    endDate: z.string().optional().describe('End date for filtering (YYYY-MM-DD). Note: Timestamps may be unreliable.'),
+    timeRange: z.string().optional().describe('Natural language time filter: "yesterday", "last week", "past 3 days", "this month", "last 2 weeks"'),
+    startDate: z.string().optional().describe('Start date for filtering (YYYY-MM-DD). Overridden by timeRange if both provided.'),
+    endDate: z.string().optional().describe('End date for filtering (YYYY-MM-DD). Overridden by timeRange if both provided.'),
     includeEmpty: z.boolean().optional().default(false).describe('Include conversations with no messages'),
     includeAiSummaries: z.boolean().optional().default(true).describe('Include AI-generated conversation summaries'),
+    includeQualityScore: z.boolean().optional().default(false).describe('Include quality scores in response'),
     includeRelevanceScore: z.boolean().optional().default(false).describe('Include relevance scores when filtering by projectPath'),
     outputMode: z.enum(['json', 'compact-json']).optional().default('json').describe('Output format: "json" for formatted JSON (default), "compact-json" for minified JSON')
   },
   async (input) => {
     try {
+      // Parse natural language time range if provided
+      let startDate = input.startDate;
+      let endDate = input.endDate;
+      if (input.timeRange) {
+        const parsed = parseTimeRange(input.timeRange);
+        if (parsed) {
+          startDate = parsed.startDate;
+          endDate = parsed.endDate;
+        }
+      }
+
       if (input.projectPath && input.includeRelevanceScore) {
         const projectInput = {
           projectPath: input.projectPath,
@@ -130,16 +145,18 @@ server.tool(
         const mappedInput = {
           limit: input.limit,
           minLength: input.minLength,
+          minQualityScore: input.minQualityScore,
           format: 'both' as const,
           hasCodeBlocks: input.hasCodeBlocks,
           keywords: input.keywords,
           projectPath: input.projectPath,
           filePattern: input.filePattern,
           relevantFiles: input.relevantFiles,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          startDate,
+          endDate,
           includeEmpty: input.includeEmpty,
           includeAiSummaries: input.includeAiSummaries,
+          includeQualityScore: input.includeQualityScore,
           agent: 'all' as const
         };
 

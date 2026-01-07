@@ -4,7 +4,10 @@
   "description": "MCP server that provides AI assistants access to Cursor chat history for analysis and insights",
   "type": "module",
   "main": "dist/server.js",
-  "bin": "dist/server.js",
+  "bin": {
+    "cursor-chat-history-mcp": "dist/server.js",
+    "cursor-chat-history-mcp-link": "dist/linker/cli.js"
+  },
   "files": [
     "dist/**/*",
     "README.md",
@@ -17,8 +20,8 @@
     "inspector": "nodemon --watch dist --exec 'npx @modelcontextprotocol/inspector node dist/server.js'",
     "test": "vitest run",
     "test:ui": "vitest --ui",
-    "prepublishOnly": "npm run build && chmod +x dist/server.js",
-    "postinstall": "chmod +x dist/server.js 2>/dev/null || true"
+    "prepublishOnly": "npm run build && chmod +x dist/server.js dist/linker/cli.js",
+    "postinstall": "chmod +x dist/server.js dist/linker/cli.js 2>/dev/null || true"
   },
   "keywords": [
     "mcp",

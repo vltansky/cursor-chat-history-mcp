@@ -11,7 +11,7 @@ const HOOK_MARKER = '# cursor-chat-history-linker';
 const HOOK_SNIPPET = `
 ${HOOK_MARKER}
 # Record commit for Cursor Chat History Linker
-(npx --yes cursor-chat-history-mcp link commit --repo "$PWD" &) 2>/dev/null
+(npx --yes cursor-chat-history-mcp-link commit --repo "$PWD" &) 2>/dev/null
 ${HOOK_MARKER}-end
 `;
 

@@ -8,19 +8,13 @@ import { join, dirname } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'fs';
 import type { LinkCommandResult } from '../types.js';
 
-// Hook script for Claude Code - reads JSON from stdin
+// Hook script for Claude Code - passes stdin directly to CLI
 const HOOK_SCRIPT = `#!/bin/bash
 # Claude Code Chat History Linker Hook Script
-# Reads hook event from stdin, passes to linker CLI
+# Passes stdin directly to linker CLI (don't consume stdin in shell)
 
-# Read stdin into variable
-PAYLOAD=$(cat)
-
-# Get event type from first argument
-EVENT="$1"
-
-# Pass payload to linker CLI with agent flag
-echo "$PAYLOAD" | npx --yes cursor-chat-history-mcp link capture-hook --agent claude-code --event "$EVENT"
+# npx will read stdin directly
+npx --yes cursor-chat-history-mcp-link capture-hook --agent claude-code 2>/dev/null || true
 `;
 
 /**

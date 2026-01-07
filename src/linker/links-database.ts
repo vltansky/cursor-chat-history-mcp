@@ -97,6 +97,12 @@ export class LinksDatabase {
         updatedAt TEXT NOT NULL,
         lastHookEvent TEXT
       );
+    `);
+
+    // Migration: Add agent column if it doesn't exist (for existing databases)
+    this.migrateAddAgentColumn();
+
+    this.db.exec(`
 
       CREATE TABLE IF NOT EXISTS commits (
         commitHash TEXT PRIMARY KEY,
@@ -130,6 +136,25 @@ export class LinksDatabase {
       CREATE INDEX IF NOT EXISTS idx_links_conversation ON links(conversationId);
       CREATE INDEX IF NOT EXISTS idx_links_commit ON links(commitHash);
     `);
+  }
+
+  /**
+   * Migration: Add agent column if it doesn't exist (for existing databases)
+   */
+  private migrateAddAgentColumn(): void {
+    if (!this.db) return;
+
+    try {
+      // Check if agent column exists
+      const tableInfo = this.db.pragma('table_info(conversations)') as Array<{ name: string }>;
+      const hasAgentColumn = tableInfo.some(col => col.name === 'agent');
+
+      if (!hasAgentColumn) {
+        this.db.exec(`ALTER TABLE conversations ADD COLUMN agent TEXT NOT NULL DEFAULT 'cursor'`);
+      }
+    } catch {
+      // Column likely already exists or table doesn't exist yet
+    }
   }
 
   private ensureConnected(): void {
