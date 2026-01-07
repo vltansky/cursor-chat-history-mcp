@@ -10,34 +10,33 @@ import type { LinkCommandResult } from '../types.js';
 import { CLAUDE_CODE_HOOK_SCRIPT } from './hook-scripts.js';
 
 /**
- * Claude Code hook configuration structure
+ * Claude Code hook configuration structure (v2.0.76+ format)
  * Based on ~/.claude/settings.json schema
+ * New format: { matcher: string, hooks: Array<{ type, command }> }
  */
-type ClaudeHookType = 'command' | 'prompt';
-type ClaudeHookMatcher = {
-  tool_name?: string;
-  [key: string]: unknown;
-};
-
-type ClaudeHook = {
-  type: ClaudeHookType;
+type ClaudeHookCommand = {
+  type: 'command' | 'prompt';
   command?: string;
   prompt?: string;
-  matcher?: ClaudeHookMatcher;
+};
+
+type ClaudeHookEntry = {
+  matcher: string;
+  hooks: ClaudeHookCommand[];
 };
 
 type ClaudeSettings = {
   hooks?: {
-    PreToolUse?: ClaudeHook[];
-    PostToolUse?: ClaudeHook[];
-    Stop?: ClaudeHook[];
-    SubagentStop?: ClaudeHook[];
-    SessionStart?: ClaudeHook[];
-    SessionEnd?: ClaudeHook[];
-    UserPromptSubmit?: ClaudeHook[];
-    PreCompact?: ClaudeHook[];
-    Notification?: ClaudeHook[];
-    [key: string]: ClaudeHook[] | undefined;
+    PreToolUse?: ClaudeHookEntry[];
+    PostToolUse?: ClaudeHookEntry[];
+    Stop?: ClaudeHookEntry[];
+    SubagentStop?: ClaudeHookEntry[];
+    SessionStart?: ClaudeHookEntry[];
+    SessionEnd?: ClaudeHookEntry[];
+    UserPromptSubmit?: ClaudeHookEntry[];
+    PreCompact?: ClaudeHookEntry[];
+    Notification?: ClaudeHookEntry[];
+    [key: string]: ClaudeHookEntry[] | undefined;
   };
   [key: string]: unknown;
 };
@@ -75,36 +74,46 @@ export async function installClaudeHook(): Promise<LinkCommandResult> {
       settings.hooks = {};
     }
 
-    // Define our hook commands
-    const sessionEndHook: ClaudeHook = {
-      type: 'command',
-      command: `${scriptPath} SessionEnd`,
+    // Define our hook entries (v2.0.76+ format)
+    const sessionEndEntry: ClaudeHookEntry = {
+      matcher: '*',
+      hooks: [
+        {
+          type: 'command',
+          command: `${scriptPath} SessionEnd`,
+        },
+      ],
     };
 
-    const stopHook: ClaudeHook = {
-      type: 'command',
-      command: `${scriptPath} Stop`,
+    const stopEntry: ClaudeHookEntry = {
+      matcher: '*',
+      hooks: [
+        {
+          type: 'command',
+          command: `${scriptPath} Stop`,
+        },
+      ],
     };
 
-    // Helper to check if hook already exists
-    const hasHook = (hooks: ClaudeHook[] | undefined, command: string): boolean => {
-      return hooks?.some(h => h.command === command) ?? false;
+    // Helper to check if hook entry already exists
+    const hasHookEntry = (entries: ClaudeHookEntry[] | undefined, command: string): boolean => {
+      return entries?.some(e => e.hooks.some(h => h.command === command)) ?? false;
     };
 
     // SessionEnd hook - captures when a session ends
     if (!settings.hooks.SessionEnd) {
       settings.hooks.SessionEnd = [];
     }
-    if (!hasHook(settings.hooks.SessionEnd, sessionEndHook.command!)) {
-      settings.hooks.SessionEnd.push(sessionEndHook);
+    if (!hasHookEntry(settings.hooks.SessionEnd, sessionEndEntry.hooks[0].command!)) {
+      settings.hooks.SessionEnd.push(sessionEndEntry);
     }
 
     // Stop hook - captures when agent stops
     if (!settings.hooks.Stop) {
       settings.hooks.Stop = [];
     }
-    if (!hasHook(settings.hooks.Stop, stopHook.command!)) {
-      settings.hooks.Stop.push(stopHook);
+    if (!hasHookEntry(settings.hooks.Stop, stopEntry.hooks[0].command!)) {
+      settings.hooks.Stop.push(stopEntry);
     }
 
     // Write updated settings.json
