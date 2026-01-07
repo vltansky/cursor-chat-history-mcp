@@ -6,15 +6,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'fs';
 import type { LinkCommandResult } from '../types.js';
-
-// Hook script passes stdin directly to the CLI without consuming it
-const HOOK_SCRIPT = `#!/bin/bash
-# Cursor Chat History Linker Hook Script
-# Passes stdin directly to linker CLI (don't consume stdin in shell)
-
-# npx will read stdin directly
-npx --yes cursor-chat-history-mcp-link capture-hook 2>/dev/null || true
-`;
+import { CURSOR_HOOK_SCRIPT } from './hook-scripts.js';
 
 type HookEntry = { command: string };
 
@@ -40,7 +32,7 @@ export async function installCursorHook(): Promise<LinkCommandResult> {
     }
 
     // Write the hook script
-    writeFileSync(scriptPath, HOOK_SCRIPT, 'utf-8');
+    writeFileSync(scriptPath, CURSOR_HOOK_SCRIPT, 'utf-8');
     chmodSync(scriptPath, '755');
 
     // Update hooks.json

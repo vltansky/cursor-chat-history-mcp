@@ -4,18 +4,10 @@
  */
 
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'fs';
 import type { LinkCommandResult } from '../types.js';
-
-// Hook script for Claude Code - passes stdin directly to CLI
-const HOOK_SCRIPT = `#!/bin/bash
-# Claude Code Chat History Linker Hook Script
-# Passes stdin directly to linker CLI (don't consume stdin in shell)
-
-# npx will read stdin directly
-npx --yes cursor-chat-history-mcp-link capture-hook --agent claude-code 2>/dev/null || true
-`;
+import { CLAUDE_CODE_HOOK_SCRIPT } from './hook-scripts.js';
 
 /**
  * Claude Code hook configuration structure
@@ -63,7 +55,7 @@ export async function installClaudeHook(): Promise<LinkCommandResult> {
     }
 
     // Write the hook script
-    writeFileSync(scriptPath, HOOK_SCRIPT, 'utf-8');
+    writeFileSync(scriptPath, CLAUDE_CODE_HOOK_SCRIPT, 'utf-8');
     chmodSync(scriptPath, '755');
 
     // Update settings.json

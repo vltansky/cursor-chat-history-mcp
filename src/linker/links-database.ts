@@ -12,7 +12,61 @@ import type {
   CommitRecord,
   LinkRecord,
   AutoLinkScore,
+  AgentName,
 } from './types.js';
+
+// Database row types (raw SQLite results before JSON parsing)
+type ConversationRow = {
+  conversationId: string;
+  agent: AgentName;
+  workspaceRoot: string;
+  projectName: string;
+  title: string | null;
+  summary: string | null;
+  aiSummary: string | null;
+  relevantFiles: string; // JSON string
+  attachedFolders: string; // JSON string
+  capturedFiles: string; // JSON string
+  searchableText: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastHookEvent: string | null;
+};
+
+type CommitRow = {
+  commitHash: string;
+  repoPath: string;
+  branch: string;
+  author: string;
+  message: string;
+  committedAt: string;
+  changedFiles: string; // JSON string
+  createdAt: string;
+};
+
+type LinkRow = {
+  id: number;
+  conversationId: string;
+  commitHash: string;
+  matchedFiles: string; // JSON string
+  confidence: number;
+  status: 'auto' | 'manual';
+  createdAt: string;
+};
+
+// Joined query result types
+type LinkWithConversationRow = LinkRow & ConversationRow & {
+  linkId: number;
+  linkCreatedAt: string;
+  convCreatedAt: string;
+  convUpdatedAt: string;
+};
+
+type LinkWithCommitRow = LinkRow & CommitRow & {
+  linkId: number;
+  linkCreatedAt: string;
+  commitCreatedAt: string;
+};
 
 /**
  * Get the platform-specific links database path
@@ -152,13 +206,41 @@ export class LinksDatabase {
       if (!hasAgentColumn) {
         this.db.exec(`ALTER TABLE conversations ADD COLUMN agent TEXT NOT NULL DEFAULT 'cursor'`);
       }
-    } catch {
-      // Column likely already exists or table doesn't exist yet
+    } catch (err) {
+      // Migration can fail if column exists or table doesn't exist yet - both are safe to ignore
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column') && !message.includes('no such table')) {
+        console.error('[LinksDB] Unexpected migration error:', message);
+      }
     }
   }
 
   private ensureConnected(): void {
     if (!this.db) throw new Error('Database not connected. Call connect() first.');
+  }
+
+  // Row parsing helpers
+  private parseConversationRow(row: ConversationRow): ConversationRecord {
+    return {
+      ...row,
+      relevantFiles: JSON.parse(row.relevantFiles),
+      attachedFolders: JSON.parse(row.attachedFolders),
+      capturedFiles: JSON.parse(row.capturedFiles),
+    };
+  }
+
+  private parseCommitRow(row: CommitRow): CommitRecord {
+    return {
+      ...row,
+      changedFiles: JSON.parse(row.changedFiles),
+    };
+  }
+
+  private parseLinkRow(row: LinkRow): LinkRecord {
+    return {
+      ...row,
+      matchedFiles: JSON.parse(row.matchedFiles),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -227,17 +309,11 @@ export class LinksDatabase {
     this.ensureConnected();
 
     const stmt = this.db!.prepare('SELECT * FROM conversations WHERE conversationId = ?');
-    const row = stmt.get(conversationId) as any;
+    const row = stmt.get(conversationId) as ConversationRow | undefined;
 
     if (!row) return null;
 
-    return {
-      ...row,
-      relevantFiles: JSON.parse(row.relevantFiles),
-      attachedFolders: JSON.parse(row.attachedFolders),
-      capturedFiles: JSON.parse(row.capturedFiles),
-      searchableText: row.searchableText,
-    };
+    return this.parseConversationRow(row);
   }
 
   /**
@@ -284,14 +360,9 @@ export class LinksDatabase {
     }
 
     const stmt = this.db!.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as ConversationRow[];
 
-    return rows.map(row => ({
-      ...row,
-      relevantFiles: JSON.parse(row.relevantFiles),
-      attachedFolders: JSON.parse(row.attachedFolders),
-      capturedFiles: JSON.parse(row.capturedFiles),
-    }));
+    return rows.map(row => this.parseConversationRow(row));
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -337,14 +408,11 @@ export class LinksDatabase {
     this.ensureConnected();
 
     const stmt = this.db!.prepare('SELECT * FROM commits WHERE commitHash = ?');
-    const row = stmt.get(commitHash) as any;
+    const row = stmt.get(commitHash) as CommitRow | undefined;
 
     if (!row) return null;
 
-    return {
-      ...row,
-      changedFiles: JSON.parse(row.changedFiles),
-    };
+    return this.parseCommitRow(row);
   }
 
   /**
@@ -384,12 +452,9 @@ export class LinksDatabase {
     }
 
     const stmt = this.db!.prepare(sql);
-    const rows = stmt.all(...params) as any[];
+    const rows = stmt.all(...params) as CommitRow[];
 
-    return rows.map(row => ({
-      ...row,
-      changedFiles: JSON.parse(row.changedFiles),
-    }));
+    return rows.map(row => this.parseCommitRow(row));
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -438,7 +503,7 @@ export class LinksDatabase {
       ORDER BY c.committedAt DESC
     `);
 
-    const rows = stmt.all(conversationId) as any[];
+    const rows = stmt.all(conversationId) as LinkWithCommitRow[];
 
     return rows.map(row => ({
       link: {
@@ -450,16 +515,10 @@ export class LinksDatabase {
         status: row.status,
         createdAt: row.linkCreatedAt,
       },
-      commit: {
-        commitHash: row.commitHash,
-        repoPath: row.repoPath,
-        branch: row.branch,
-        author: row.author,
-        message: row.message,
-        committedAt: row.committedAt,
-        changedFiles: JSON.parse(row.changedFiles),
+      commit: this.parseCommitRow({
+        ...row,
         createdAt: row.commitCreatedAt,
-      },
+      }),
     }));
   }
 
@@ -479,7 +538,7 @@ export class LinksDatabase {
       ORDER BY l.confidence DESC
     `);
 
-    const rows = stmt.all(commitHash) as any[];
+    const rows = stmt.all(commitHash) as LinkWithConversationRow[];
 
     return rows.map(row => ({
       link: {
@@ -491,22 +550,11 @@ export class LinksDatabase {
         status: row.status,
         createdAt: row.linkCreatedAt,
       },
-      conversation: {
-        conversationId: row.conversationId,
-        agent: row.agent ?? 'cursor',
-        workspaceRoot: row.workspaceRoot,
-        projectName: row.projectName,
-        title: row.title,
-        summary: row.summary,
-        aiSummary: row.aiSummary,
-        relevantFiles: JSON.parse(row.relevantFiles),
-        attachedFolders: JSON.parse(row.attachedFolders),
-        capturedFiles: JSON.parse(row.capturedFiles),
-        searchableText: row.searchableText,
+      conversation: this.parseConversationRow({
+        ...row,
         createdAt: row.convCreatedAt,
         updatedAt: row.convUpdatedAt,
-        lastHookEvent: row.lastHookEvent,
-      },
+      }),
     }));
   }
 
@@ -541,15 +589,17 @@ export class LinksDatabase {
       ORDER BY updatedAt DESC
     `);
 
-    const rows = stmt.all(windowStart, commit.committedAt) as any[];
+    const rows = stmt.all(windowStart, commit.committedAt) as ConversationRow[];
     const candidates: AutoLinkScore[] = [];
 
     const commitFiles = new Set(commit.changedFiles.map(f => this.normalizePath(f)));
 
     for (const row of rows) {
+      const relevantFiles = JSON.parse(row.relevantFiles) as string[];
+      const capturedFiles = JSON.parse(row.capturedFiles) as string[];
       const convFiles = new Set([
-        ...JSON.parse(row.relevantFiles).map((f: string) => this.normalizePath(f)),
-        ...JSON.parse(row.capturedFiles).map((f: string) => this.normalizePath(f)),
+        ...relevantFiles.map(f => this.normalizePath(f)),
+        ...capturedFiles.map(f => this.normalizePath(f)),
       ]);
 
       // Calculate file overlap
@@ -640,23 +690,22 @@ export class LinksDatabase {
     params.push(limit * 2);
 
     const convStmt = this.db!.prepare(sql);
-    const convRows = convStmt.all(...params) as any[];
+    const convRows = convStmt.all(...params) as ConversationRow[];
 
     const conversations = convRows.map(row => {
       const relevantFiles = JSON.parse(row.relevantFiles) as string[];
       const capturedFiles = JSON.parse(row.capturedFiles) as string[];
-      const searchableText = row.searchableText as string | null;
 
       const isDirect = relevantFiles.some(f => this.normalizePath(f) === normalizedPath) ||
                       capturedFiles.some(f => this.normalizePath(f) === normalizedPath);
 
       // Calculate keyword matches if keywords provided and searchableText exists
       let keywordMatches: Array<{ keyword: string; count: number; excerpts: string[] }> | undefined;
-      if (keywords.length > 0 && searchableText) {
+      if (keywords.length > 0 && row.searchableText) {
         keywordMatches = keywords.map(kw => {
           const regex = new RegExp(kw, 'gi');
-          const matches = searchableText.match(regex) || [];
-          const excerpts = this.extractExcerpts(searchableText, kw, 3);
+          const matches = row.searchableText!.match(regex) || [];
+          const excerpts = this.extractExcerpts(row.searchableText!, kw, 3);
           return {
             keyword: kw,
             count: matches.length,
@@ -666,14 +715,8 @@ export class LinksDatabase {
       }
 
       return {
-        conversation: {
-          ...row,
-          relevantFiles,
-          attachedFolders: JSON.parse(row.attachedFolders),
-          capturedFiles,
-          searchableText,
-        } as ConversationRecord,
-        relevance: (isDirect ? 'direct' : 'indirect') as 'direct' | 'indirect',
+        conversation: this.parseConversationRow(row),
+        relevance: isDirect ? 'direct' as const : 'indirect' as const,
         keywordMatches,
       };
     }).slice(0, limit);
@@ -686,18 +729,15 @@ export class LinksDatabase {
       LIMIT ?
     `);
 
-    const commitRows = commitStmt.all(`%${normalizedPath}%`, limit * 2) as any[];
+    const commitRows = commitStmt.all(`%${normalizedPath}%`, limit * 2) as CommitRow[];
 
-    const commits: Array<{ commit: CommitRecord; relevance: 'direct' | 'indirect' }> = commitRows.map(row => {
+    const commits = commitRows.map(row => {
       const changedFiles = JSON.parse(row.changedFiles) as string[];
       const isDirect = changedFiles.some(f => this.normalizePath(f) === normalizedPath);
 
       return {
-        commit: {
-          ...row,
-          changedFiles,
-        } as CommitRecord,
-        relevance: (isDirect ? 'direct' : 'indirect') as 'direct' | 'indirect',
+        commit: this.parseCommitRow(row),
+        relevance: isDirect ? 'direct' as const : 'indirect' as const,
       };
     }).slice(0, limit);
 
